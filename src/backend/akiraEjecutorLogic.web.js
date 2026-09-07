@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * KAMISUITE — AKIRA · Intérprete de capacidades (Wix Velo)
  * Archivo:  backend/akiraEjecutorLogic.web.js
- * VERSION:  3.3.0
+ * VERSION:  3.4.0
  * FECHA:    6 Septiembre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
@@ -161,7 +161,7 @@ import {
 
 import { cargarTodosContactos } from 'backend/recepcionLogic.web';
 
-const VERSION = '3.3.0';
+const VERSION = '3.4.0';
 const TAG = `[AkiraEjecutor][${VERSION}]`;
 
 const CMS_CAPABILITIES = 'AkiraCapabilities';
@@ -211,6 +211,24 @@ function clave(s) {
   return String(s || '').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
     .replace(/[_\-]+/g, ' ').replace(/\s+/g, ' ').trim().toLowerCase();
 }
+// v3.4.0 — HORAS. La gente dice "a las 10"; la agenda escribe "10:00". La
+// comparación era literal, así que "10" no casaba con "10:00" y un hueco
+// libre salía como colisión, o una cita de las 12 no se encontraba diciendo
+// "la de las 12". Solo actúa cuando el valor ES una hora; cualquier otro
+// texto pasa intacto.
+const RE_HORA = /^([01]?\d|2[0-3])(?::([0-5]\d))?$/;
+function horaNorm(v) {
+  const m = RE_HORA.exec(String(v == null ? '' : v).trim());
+  if (!m) return null;
+  return String(m[1]).padStart(2, '0') + ':' + (m[2] || '00');
+}
+// Igualdad tolerante: si los dos lados son horas, se comparan normalizadas.
+function mismoValor(a, b) {
+  const ha = horaNorm(a), hb = horaNorm(b);
+  if (ha && hb) return ha === hb;
+  return String(a == null ? '' : a) === String(b == null ? '' : b);
+}
+
 function tel9(v) {
   const d = String(v || '').replace(/[^\d]/g, '');
   return d.length >= 9 ? d.slice(-9) : '';
@@ -306,6 +324,7 @@ function cumpleCondicion(cond, ctx) {
   if (cond.existe === true) return !esVacio(v);
   if (cond.contiene !== undefined) {
     const x = resolver(cond.contiene, ctx);
+    if (Array.isArray(v)) return v.some(el => mismoValor(el, x));
     return Array.isArray(v) ? v.indexOf(x) >= 0 : String(v || '').indexOf(String(x)) >= 0;
   }
   if (cond.distinto !== undefined) return v !== resolver(cond.distinto, ctx);
@@ -350,7 +369,8 @@ function verboBusca(paso, ctx) {
       if (!t9) continue;
       cand = lista.filter(x => tel9(porRuta(x, campo)) === t9);
     } else if (modo === 'exacto') {
-      cand = lista.filter(x => String(porRuta(x, campo) || '') === txt);
+      // v3.4.0 — mismoValor: "12" encuentra "12:00".
+      cand = lista.filter(x => mismoValor(porRuta(x, campo), txt));
     } else {
       if (esEmail || t9) continue;
       // v3.3.0 — TRES PASADAS. Exacta, subcadena y, si nada casó, todas las
@@ -394,9 +414,14 @@ function verboComprueba(paso, ctx) {
   const v = resolver(paso.que, ctx);
   if (paso.contiene !== undefined) {
     const x = resolver(paso.contiene, ctx);
-    return { cumple: Array.isArray(v) ? v.indexOf(x) >= 0 : String(v || '').indexOf(String(x)) >= 0, valor: v };
+    // v3.4.0 — Contra una lista de horas, "10" tiene que encontrar "10:00".
+    // Era la comparación que devolvía colisión sobre un hueco libre.
+    const cumple = Array.isArray(v)
+      ? v.some(el => mismoValor(el, x))
+      : String(v || '').indexOf(String(x)) >= 0;
+    return { cumple, valor: v };
   }
-  if (paso.vale !== undefined) return { cumple: v === resolver(paso.vale, ctx), valor: v };
+  if (paso.vale !== undefined) return { cumple: mismoValor(v, resolver(paso.vale, ctx)), valor: v };
   if (paso.existe === true) return { cumple: !esVacio(v), valor: v };
   return { cumple: false, valor: v };
 }
@@ -636,7 +661,12 @@ export const ejecutarAccion = webMethod(
       }
 
       console.log(`${TAG} ✅ ${accion} ejecutada (${((Date.now() - t0) / 1000).toFixed(2)}s)`);
-      return { ok: true, version: VERSION, ejecutado: true, resumen, resultado: res };
+      // v3.4.0 — `referencia`: el identificador de lo que se acaba de escribir.
+      // Sin él, "añade un secado a la cita que acabas de crear" no tiene a qué
+      // agarrarse: la nota del hilo contaba lo ocurrido pero sin ningún id.
+      const referencia = (res && (res.reservaId || res._id || res.id)) ||
+                         (payload && payload.reservaId) || null;
+      return { ok: true, version: VERSION, ejecutado: true, resumen, referencia, resultado: res };
 
     } catch (e) {
       console.error(`${TAG} ❌ ejecutarAccion ${accion}:`, e.message);
