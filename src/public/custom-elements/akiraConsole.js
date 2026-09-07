@@ -2,7 +2,7 @@
  * KAMISUITE — AKIRA Console (Wix Custom Element)
  * Archivo:  public/custom-elements/akiraConsole.js
  * Tag name: akira-console
- * VERSION:  1.5.1
+ * VERSION:  1.6.0
  * FECHA:    20 Agosto 2026
  *
  * CAMBIOS v1.5.0 → v1.5.1 — LAS NOTAS INTERNAS NO SE PINTAN.
@@ -803,6 +803,15 @@
         });
         this._hasMessages = true;
         this._scrollBottom();
+      }
+
+      // v1.6.0 — Tarjeta pendiente de confirmar. La propuesta viajaba solo en
+      // la respuesta HTTP: si el gateway cortaba a los 14s, se perdía y el
+      // hilo quedaba mudo, porque el turno guardado del asistente es la nota
+      // entre corchetes que se acaba de descartar arriba. Ahora la sesión la
+      // recuerda y se repinta aquí, después de los mensajes.
+      if (payload.propuesta && payload.propuesta.accion) {
+        this._appendPropuesta(payload.propuesta);
       }
       this._highlightActiveChat();
     }
