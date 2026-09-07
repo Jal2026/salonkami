@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * KAMISUITE — AKIRA · Intérprete de capacidades (Wix Velo)
  * Archivo:  backend/akiraEjecutorLogic.web.js
- * VERSION:  3.5.0
+ * VERSION:  3.6.0
  * FECHA:    6 Septiembre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
@@ -163,7 +163,7 @@ import {
 
 import { cargarTodosContactos } from 'backend/recepcionLogic.web';
 
-const VERSION = '3.5.0';
+const VERSION = '3.6.0';
 const TAG = `[AkiraEjecutor][${VERSION}]`;
 
 const CMS_CAPABILITIES = 'AkiraCapabilities';
@@ -551,6 +551,10 @@ async function _leerCapabilities() {
       ejemplos:     listaDeTexto(it.ejemplosPreguntas, '|'),
       backend:      String(it.backend || '').trim(),
       funcion:      String(it.funcion || '').trim(),
+      // v3.6.0 — Frase que se dice cuando la acción ya está hecha. "Queda
+      // guardada" servía para reservar y chirriaba al cancelar o al cobrar.
+      // Vive en la fila, como el resto de lo que se lee en pantalla.
+      textoHecho:   String(it.textoHecho || '').trim(),
       confirmacion: it.requiereConfirmacion !== false,
       forzable:     it.forzable === true,
       preparar:     Array.isArray(pasos.preparar) ? pasos.preparar : [],
@@ -702,7 +706,8 @@ export const ejecutarAccion = webMethod(
       // agarrarse: la nota del hilo contaba lo ocurrido pero sin ningún id.
       const referencia = (res && (res.reservaId || res._id || res.id)) ||
                          (payload && payload.reservaId) || null;
-      return { ok: true, version: VERSION, ejecutado: true, resumen, referencia, resultado: res };
+      return { ok: true, version: VERSION, ejecutado: true, resumen, referencia,
+               textoHecho: cap.textoHecho || '', resultado: res };
 
     } catch (e) {
       console.error(`${TAG} ❌ ejecutarAccion ${accion}:`, e.message);
