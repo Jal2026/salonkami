@@ -1,10 +1,50 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * KAMISUITE — AKIRA Backend (Wix Velo)
  * Archivo:  backend/akiraLogic.web.js
- * VERSION:  1.15.1
- * FECHA:    20 Agosto 2026
+ * VERSION:  1.16.0
+ * FECHA:    7 Septiembre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
+ * CAMBIOS v1.15.1 → v1.16.0 — RECEPCIÓN DEJA DE HEREDAR LA CONDUCTA DEL ASESOR
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ *   `_planoUsaHerramientas` resolvía DOS cosas con una sola condición
+ *   (plano !== 'ayuda'): quién tiene herramientas de datos y quién recibe el
+ *   manual de conducta escrito para el ASESOR. Recepción necesita lo primero
+ *   y no lo segundo, y por esa puerta le entraban catorce reglas pensadas
+ *   para un consultor de negocio — entre ellas la 8 ("eres un consultor, no
+ *   un informe") y la 9b, que le ordena preguntar para desambiguar en vez de
+ *   resolver. Encima del alignment de su plano, eso es ruido contradictorio.
+ *
+ *   Se separa en dos puertas:
+ *
+ *     · `_planoUsaHerramientas` — MECÁNICA. Sigue decidiendo el contexto de
+ *       filtrado (personal, familias, categorías), el bloque de cómo se leen
+ *       las colecciones, la tabla de fechas y las reglas que describen cómo
+ *       se llaman las herramientas: 1, 1b, 2, 3, 4, 4b, 9 y 9c. Sin ellas el
+ *       motor de consulta no responde en ningún plano.
+ *
+ *     · `_planoUsaConductaConsultor` — CONDUCTA. Solo ASESOR. Se lleva las
+ *       reglas 5, 6, 7, 8 y 9b, que no describen cómo se usa una herramienta
+ *       sino cómo se comporta y cómo redacta.
+ *
+ *   El prompt de ASESOR queda IDÉNTICO al de v1.15.1: mismas reglas, mismo
+ *   orden, mismo bloque. Lo único que cambia es lo que YA NO recibe Recepción.
+ *
+ *   `INSTRUCCION_CORPUS.asistente` era copia literal del texto del ASESOR
+ *   ("tu criterio experto: ratios, metodología y normativa"). Pasa a vacío y
+ *   el encabezado del corpus solo se emite si hay texto. Con la clave presente
+ *   y vacía, `_instruccionCorpus` ya no cae al valor del plano por defecto.
+ *
+ *   La conducta de Recepción vive ENTERA en su fila de AkiraAlignment
+ *   (modo='asistente', status='publicado'). ⚠️ `grOnlyQuery` debe ir en false
+ *   en esa fila: inyecta "Solo consulta. No ofrezcas agendar, reservar ni
+ *   registrar nada", que con las herramientas de acción abiertas es una
+ *   contradicción dentro del mismo prompt.
+ *
+ *   `_identidadPorDefecto('asistente')` se conserva como red: solo entra si
+ *   no hay fila publicada para el plano.
+ *
  * ───────────────────────────────────────────────────────────────────────────
  * CAMBIOS v1.14.0 → v1.15.0 — UNA ACCIÓN A MEDIAS NO SE GUARDA COMO HECHA
  * ───────────────────────────────────────────────────────────────────────────
@@ -639,7 +679,7 @@ import { cargarTodosContactos } from 'backend/recepcionLogic.web';
 // La ESCRITURA no está aquí: vive en ejecutarAccion, que llama el page code.
 import { listarAccionesCore, prepararAccionCore } from 'backend/akiraEjecutorLogic.web';
 
-const VERSION = '1.15.1';
+const VERSION = '1.16.0';
 const TAG = `[AkiraLogic][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -2118,15 +2158,22 @@ function _filtrarDocsPorPlano(docs, plano) {
 //   · ASESOR    → normativa y metodología. Criterio experto, no se cita.
 //   · AYUDA     → Manual de Usuario. Se reproduce literal: nombres de pantalla
 //                 y pasos exactos. Parafrasear aquí es inventar la interfaz.
-//   · ASISTENTE → hereda la redacción de ASESOR mientras no tenga corpus propio.
+//   · ASISTENTE → sin encabezado. Cómo debe usar su corpus lo dice su fila de
+//                 AkiraAlignment, no este archivo (v1.16.0). La clave existe y
+//                 vale '' a propósito: si se borrara, _instruccionCorpus caería
+//                 al valor del plano por defecto y volvería el texto del ASESOR.
 const INSTRUCCION_CORPUS = {
   asesor: 'Este material es tu criterio experto: interpretación de ratios, metodología de gestión y normativa aplicable. Intégralo con naturalidad; no lo cites textualmente.',
   ayuda: 'Este material es el Manual de Usuario oficial de KAMISUITE, un capítulo por aplicación. Es tu ÚNICA fuente sobre cómo se usa el software. Reproduce los nombres de pantalla, botones, pestañas y campos EXACTAMENTE como aparecen en el manual, sin reformularlos ni traducirlos, y respeta el orden de los pasos. Si el manual no cubre lo que se pregunta, dilo en lugar de deducirlo: nunca describas una pantalla, un botón o un paso que no esté en el manual.',
-  asistente: 'Este material es tu criterio experto: interpretación de ratios, metodología de gestión y normativa aplicable. Intégralo con naturalidad; no lo cites textualmente.'
+  asistente: ''
 };
 
+// v1.16.0 — Se comprueba la EXISTENCIA de la clave, no su verdad: `asistente`
+// vale '' y con `||` habría caído al texto de ASESOR, que es justo el bug.
 function _instruccionCorpus(plano) {
-  return INSTRUCCION_CORPUS[plano] || INSTRUCCION_CORPUS[PLANO_DEFECTO];
+  return Object.prototype.hasOwnProperty.call(INSTRUCCION_CORPUS, plano)
+    ? INSTRUCCION_CORPUS[plano]
+    : INSTRUCCION_CORPUS[PLANO_DEFECTO];
 }
 
 // ── ENRUTADOR DE PLANO (v1.7.0) ──
@@ -2152,6 +2199,15 @@ function _planoUsaHerramientas(plano) {
 // analiza el negocio y AYUDA explica el manual; ninguno de los dos escribe.
 function _planoUsaAcciones(plano) {
   return plano === 'asistente';
+}
+
+// v1.16.0 — Conducta de consultor de negocio: SOLO ASESOR. Tener herramientas
+// de datos y comportarse como consultor son cosas distintas, y hasta aquí las
+// decidía la misma condición. Recepción consulta los mismos datos, pero no
+// redacta conclusiones de negocio ni pregunta para desambiguar en vez de
+// resolver: su conducta sale de su fila de AkiraAlignment.
+function _planoUsaConductaConsultor(plano) {
+  return plano === 'asesor';
 }
 
 // v1.10.0 — Una herramienta POR ACCIÓN, generada desde el registro de
@@ -2379,54 +2435,81 @@ function _buildSystemBlocks(ctx) {
   ].join('\n'));
 
   // ── REGLAS DE USO DE LA HERRAMIENTA ──
-  if (conHerramientas) stable.push([
-    '--- REGLAS DE TRABAJO (INQUEBRANTABLES) ---',
-    '1. NUNCA des una cifra que no venga de una herramienta. No calcules sumas,',
-    '   medias ni porcentajes de cabeza: pídelos y nárralos. Los cálculos ya',
-    '   vienen hechos en la respuesta.',
-    '1b. Tienes DOS herramientas y son complementarias:',
-    '   · consultar_datos_salon → qué PASÓ o pasará (reservas, cobros,',
-    '     conversión). Tiene fecha.',
-    '   · consultar_configuracion_salon → cómo está MONTADO el salón (precios',
-    '     de tarifa, horarios del personal, almacén, ajustes). NO tiene fecha.',
-    '   Cuando la pregunta cruce ambas, llama a las dos. Ejemplos: comparar el',
-    '   precio de tarifa con lo cobrado de verdad; contrastar las horas de',
-    '   horario de un profesional con las que tiene ocupadas; valorar si un',
-    '   servicio rinde según su duración configurada.',
-    '2. NUNCA calcules fechas. Copia las de la tabla FECHAS de este system.',
-    '3. Si necesitas comparar dos periodos, llama a la herramienta dos veces.',
-    '4. Si la herramienta devuelve numRegistros 0, dilo con claridad: no hay datos',
-    '   para ese filtro. No inventes ni rellenes con estimaciones.',
-    '4b. Si la respuesta trae un campo AVISO, TRASLÁDALO al usuario: significa',
-    '   que las cifras son parciales. Nunca des un total incompleto como si',
-    '   fuera definitivo.',
-    // v1.10.0 — La regla 5 se resuelve según el plano: ASESOR sigue siendo
-    // solo lectura; ASISTENTE ejecuta, y cómo debe hacerlo se lo dice su
-    // alignment (AkiraAlignment, editable desde el Entrenador).
-    (_planoUsaAcciones(planoActivo)
-      ? '5. Además de consultar, PUEDES EJECUTAR acciones en el salón mediante tus\n   herramientas de acción.'
-      : '5. Eres SOLO LECTURA. No puedes reservar, cancelar ni modificar nada. Si te lo\n   piden, indica que se haga desde Recepción PRO.'),
-    '6. Importes en euros con el símbolo €. Redondea a 2 decimales.',
-    '7. No expliques tu proceso interno ni menciones "la herramienta", "el JSON",',
-    '   "la consulta" o los nombres de las colecciones. Habla de negocio, no de',
-    '   fontanería.',
-    '8. No te limites al dato: aporta la conclusión. Eres un consultor, no un',
-    '   informe. Si ves una anomalía relevante, señálala.',
-    '9. CATEGORÍAS. La categoría de un servicio es `group`, no `family`. Cuando',
-    '   el usuario nombre una categoría en lenguaje natural ("color", "corte",',
-    '   "uñas", "peinados"), tradúcela al valor canónico EXACTO de la lista',
-    '   "CATEGORÍAS DISPONIBLES" y pásalo en el parámetro `group`. Nunca',
-    '   inventes un nombre de categoría que no esté en esa lista.',
-    '9b. DESAMBIGUA. Si un término coloquial encaja con VARIAS categorías de la',
-    '   lista, NO elijas por tu cuenta: pregunta al usuario cuál quiere. Ejemplo:',
-    '   "corte" puede ser CORTESMUJER o CABALLERO → pregunta "¿cortes de mujer,',
-    '   de caballero, o ambos?". Solo si el usuario ya lo aclaró, filtra.',
-    '9c. RESERVAS vs SERVICIOS. "¿Cuántas reservas/citas de color?" → modo',
-    '   reservas con group (cuenta la cita entera, por su servicio principal).',
-    '   "¿Cuántos servicios/cuántos cortes se hicieron?" → modo servicios (cuenta',
-    '   cada servicio individual, incluido el que va de complemento dentro de una',
-    '   reserva de otra categoría). Elige el modo según lo que se pregunta.'
-  ].join('\n'));
+  // v1.16.0 — DOS PUERTAS, NO UNA. Las reglas que describen CÓMO SE LLAMA una
+  // herramienta (1, 1b, 2, 3, 4, 4b, 9, 9c) las recibe todo plano con motor de
+  // consulta. Las que describen CÓMO SE COMPORTA un consultor de negocio
+  // (5, 6, 7, 8, 9b) solo las recibe ASESOR. Recepción consulta los mismos
+  // datos; su conducta la fija su fila de AkiraAlignment.
+  //
+  // El orden y el texto de las reglas NO se han tocado: el prompt de ASESOR
+  // es idéntico al de v1.15.1. Lo que cambia es lo que ya no recibe Recepción.
+  if (conHerramientas) {
+    const conConducta = _planoUsaConductaConsultor(planoActivo);
+    const reglas = [
+      '--- REGLAS DE TRABAJO (INQUEBRANTABLES) ---',
+      '1. NUNCA des una cifra que no venga de una herramienta. No calcules sumas,',
+      '   medias ni porcentajes de cabeza: pídelos y nárralos. Los cálculos ya',
+      '   vienen hechos en la respuesta.',
+      '1b. Tienes DOS herramientas y son complementarias:',
+      '   · consultar_datos_salon → qué PASÓ o pasará (reservas, cobros,',
+      '     conversión). Tiene fecha.',
+      '   · consultar_configuracion_salon → cómo está MONTADO el salón (precios',
+      '     de tarifa, horarios del personal, almacén, ajustes). NO tiene fecha.',
+      '   Cuando la pregunta cruce ambas, llama a las dos. Ejemplos: comparar el',
+      '   precio de tarifa con lo cobrado de verdad; contrastar las horas de',
+      '   horario de un profesional con las que tiene ocupadas; valorar si un',
+      '   servicio rinde según su duración configurada.',
+      '2. NUNCA calcules fechas. Copia las de la tabla FECHAS de este system.',
+      '3. Si necesitas comparar dos periodos, llama a la herramienta dos veces.',
+      '4. Si la herramienta devuelve numRegistros 0, dilo con claridad: no hay datos',
+      '   para ese filtro. No inventes ni rellenes con estimaciones.',
+      '4b. Si la respuesta trae un campo AVISO, TRASLÁDALO al usuario: significa',
+      '   que las cifras son parciales. Nunca des un total incompleto como si',
+      '   fuera definitivo.'
+    ];
+
+    // Conducta de consultor. Sale del prompt en cualquier plano que no sea
+    // ASESOR: la 8 le dice a Recepción que es un consultor, y la 9b le ordena
+    // preguntar cuando debería resolver.
+    if (conConducta) {
+      reglas.push(
+        '5. Eres SOLO LECTURA. No puedes reservar, cancelar ni modificar nada. Si te lo\n   piden, indica que se haga desde Recepción PRO.',
+        '6. Importes en euros con el símbolo €. Redondea a 2 decimales.',
+        '7. No expliques tu proceso interno ni menciones "la herramienta", "el JSON",',
+        '   "la consulta" o los nombres de las colecciones. Habla de negocio, no de',
+        '   fontanería.',
+        '8. No te limites al dato: aporta la conclusión. Eres un consultor, no un',
+        '   informe. Si ves una anomalía relevante, señálala.'
+      );
+    }
+
+    reglas.push(
+      '9. CATEGORÍAS. La categoría de un servicio es `group`, no `family`. Cuando',
+      '   el usuario nombre una categoría en lenguaje natural ("color", "corte",',
+      '   "uñas", "peinados"), tradúcela al valor canónico EXACTO de la lista',
+      '   "CATEGORÍAS DISPONIBLES" y pásalo en el parámetro `group`. Nunca',
+      '   inventes un nombre de categoría que no esté en esa lista.'
+    );
+
+    if (conConducta) {
+      reglas.push(
+        '9b. DESAMBIGUA. Si un término coloquial encaja con VARIAS categorías de la',
+        '   lista, NO elijas por tu cuenta: pregunta al usuario cuál quiere. Ejemplo:',
+        '   "corte" puede ser CORTESMUJER o CABALLERO → pregunta "¿cortes de mujer,',
+        '   de caballero, o ambos?". Solo si el usuario ya lo aclaró, filtra.'
+      );
+    }
+
+    reglas.push(
+      '9c. RESERVAS vs SERVICIOS. "¿Cuántas reservas/citas de color?" → modo',
+      '   reservas con group (cuenta la cita entera, por su servicio principal).',
+      '   "¿Cuántos servicios/cuántos cortes se hicieron?" → modo servicios (cuenta',
+      '   cada servicio individual, incluido el que va de complemento dentro de una',
+      '   reserva de otra categoría). Elige el modo según lo que se pregunta.'
+    );
+
+    stable.push(reglas.join('\n'));
+  }
 
   // ── REGLAS DEL PLANO AYUDA ──
   // Sustituyen a las reglas del motor de consulta, que aquí no aplican.
@@ -2471,7 +2554,10 @@ function _buildSystemBlocks(ctx) {
   // botón inventados ("Cierre de Caja" donde la pantalla pone "Cierre Diario").
   if (documentos && documentos.length > 0) {
     const bloques = ['--- CONOCIMIENTO DE REFERENCIA ---'];
-    bloques.push(_instruccionCorpus(planoActivo));
+    // v1.16.0 — Recepción no lleva encabezado: su instrucción vale '' y
+    // empujarla metería una línea en blanco delante del corpus.
+    const instrCorpus = _instruccionCorpus(planoActivo);
+    if (instrCorpus) bloques.push(instrCorpus);
     const topeDocs = _docCharsDelPlano(planoActivo);
     let chars = 0;
     for (const d of documentos) {
