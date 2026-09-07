@@ -18,6 +18,26 @@
 //   prepararse jamás. Ahora una lista vacía o la palabra ninguno/nada/no/tal
 //   cual contestan que no a todos los opcionales de una vez.
 //
+// v0.11.8 — UNA ETIQUETA MAL ESCRITA NO PUEDE COSTAR TRES VUELTAS.
+//   Medido en producción: con "corte mujer" la composición devolvió 0
+//   pendientes y 1 no reconocido. Correcto, pero inservible: al haberse
+//   cerrado todo lo demás, `opcionales` y `detalleOpcionales` iban vacíos, así
+//   que el modelo recibía "faltan datos" SIN NADA contra lo que corregir. Se
+//   quedó sin lista, volvió a llamar sin complementos para recuperarla, y la
+//   conversación gastó cuatro viajes a la API y reventó el techo de 14s del
+//   gateway. La composición acabó resolviendo bien —80min, 63€— pero después
+//   de que la conexión ya se hubiera cortado.
+//
+//   Ahora, cuando algo no se reconoce, la respuesta lleva SIEMPRE:
+//     · `catalogo`  — todos los complementos con sus etiquetas exactas y las
+//                     opciones de cada grupo. Es contra lo que corregir.
+//     · `entendido` — lo que sí se entendió de esta llamada, para que no haya
+//                     que volver a preguntárselo a la persona.
+//   Con eso, corregir es un viaje, no tres.
+//
+//   Y el log escribe las etiquetas que no se reconocieron, no solo cuántas.
+//   Con el contador había que adivinar cuál era.
+//
 // v0.11.7 — LA LISTA ES LA RESPUESTA COMPLETA.
 //   Una selección parcial no tenía forma de cerrarse. Contestar "Corte Mujer"
 //   a "¿alguno o ninguno?" marcaba ese complemento y dejaba los otros cuatro
@@ -898,7 +918,7 @@
 import { Permissions, webMethod } from 'wix-web-module';
 import wixData from 'wix-data';
 
-const VERSION = '0.11.7';
+const VERSION = '0.11.8';
 const TAG = `[WidgetPublico][${VERSION}]`;
 
 // v0.10.0 — Prefijo de ordenación del nombre del personal.
@@ -3575,7 +3595,27 @@ export const getComposicionServicio = webMethod(
         // saltar. Antes había que deducirlo de una lista, y se acabó
         // contando al usuario que el sistema exigía elegir complementos
         // cuando ninguno era obligatorio.
-        console.log(`${TAG} getComposicionServicio "${svc.name}": ${obligatorios.length} obligatoria(s), ${detalleOpcionales.length} opcional(es), ${noReconocidos.length} no reconocido(s).`);
+        // v0.11.8 — Catálogo de referencia y lo ya entendido. Solo se montan
+        // cuando hay algo que corregir: en el camino normal no ocupan sitio.
+        const catalogo = noReconocidos.length === 0 ? undefined : comps.map(c => ({
+          etiqueta: c.label,
+          tipo: c.type,
+          obligatorio: !!c.required,
+          opciones: Array.isArray(c.options) ? c.options.map(o => o.label) : undefined
+        }));
+        const entendido = noReconocidos.length === 0 ? undefined : comps
+          .filter(c => {
+            const v = compSel[c.id];
+            return (c.type === 'bool') ? v === true : (!!v && v !== 'none');
+          })
+          .map(c => {
+            const v = compSel[c.id];
+            if (c.type === 'bool') return c.label;
+            const o = (c.options || []).find(op => op.id === v);
+            return (o && o.label) ? `${c.label} ${o.label}` : c.label;
+          });
+
+        console.log(`${TAG} getComposicionServicio "${svc.name}": ${obligatorios.length} obligatoria(s), ${detalleOpcionales.length} opcional(es), ${noReconocidos.length} no reconocido(s)${noReconocidos.length ? ' → ' + noReconocidos.join(' | ') : ''}.`);
 
         return {
           ok: true, version: VERSION, estado: 'faltan_datos', ambito: nombreAmbito,
@@ -3589,7 +3629,11 @@ export const getComposicionServicio = webMethod(
           pendiente: obligatorios,
           opcionales,
           detalleOpcionales,
-          noReconocidos
+          noReconocidos,
+          catalogo,
+          entendido,
+          comoCorregir: noReconocidos.length === 0 ? undefined
+            : 'No he reconocido esas etiquetas. En `catalogo` tienes las exactas y las opciones de cada grupo. Vuelve a llamar UNA vez con la lista completa y corregida, incluyendo lo que ya está en `entendido`; no hace falta volver a preguntar nada a la persona.'
         };
       }
 
@@ -3606,8 +3650,12 @@ export const getComposicionServicio = webMethod(
           }
         : null;
 
+      // v0.11.7 — `etiquetas`: los complementos elegidos ya en texto, listos
+      // para pintarse en la tarjeta de confirmación. `complementos` sigue
+      // siendo la lista de objetos con precio y duración, intacta.
       const elegido = {
         variante: variantElegida ? { id: variantElegida.id, label: variantElegida.label } : null,
+        etiquetas: [],
         complementos: comps
           .filter(c => {
             const v = compSel[c.id];
@@ -3622,6 +3670,7 @@ export const getComposicionServicio = webMethod(
             return { label: c.label, opcion: (o && o.label) || '', price: (o && o.price != null) ? Number(o.price) : null, duration: (o ? toNum(o.duration) : 0) };
           })
       };
+      elegido.etiquetas = elegido.complementos.map(c => c.opcion ? `${c.label} ${c.opcion}` : c.label);
 
       console.log(`${TAG} ✅ getComposicionServicio RESUELTO "${svc.name}" (${nombreAmbito}): ${totales.duracionMin}min · ${totales.total}€ · ${complementosSetupUid.length} complemento(s). ${((Date.now() - t0) / 1000).toFixed(2)}s`);
 
