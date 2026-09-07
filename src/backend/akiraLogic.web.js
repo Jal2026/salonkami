@@ -1,8 +1,25 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * KAMISUITE — AKIRA Backend (Wix Velo)
  * Archivo:  backend/akiraLogic.web.js
- * VERSION:  1.19.0
+ * VERSION:  1.19.1
  * FECHA:    7 Septiembre 2026
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * CAMBIOS v1.19.0 → v1.19.1 — LA NOTA NO PUEDE HABLAR DE POSICIONES
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ *   La nota de v1.19.0 numeraba los candidatos y decía "en el mismo orden en
+ *   que se enumeraron". Es falso: el orden de la nota es el que devuelve la
+ *   búsqueda —por hora ascendente— y el que ve el usuario es el que el modelo
+ *   decide al redactar. Con dos citas el mismo día, el usuario contestó "1"
+ *   refiriéndose a la de las 12:00 y el modelo cogió el identificador que
+ *   ocupaba la posición 1 en la nota, que era la de las 10:00. Preparó la
+ *   acción sobre la cita equivocada y la tarjeta salió con ella.
+ *
+ *   La nota ya no numera nada. Lista cada candidato con los datos que lo
+ *   distinguen —qué es, a qué hora, cuánto cuesta— y su identificador, y dice
+ *   expresamente que un número del usuario se resuelve contra la lista que el
+ *   propio modelo enseñó, no contra ésta.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * CAMBIOS v1.18.0 → v1.19.0 — LOS CANDIDATOS SOBREVIVEN AL TURNO
@@ -767,7 +784,7 @@ import { cargarTodosContactos } from 'backend/recepcionLogic.web';
 // La ESCRITURA no está aquí: vive en ejecutarAccion, que llama el page code.
 import { listarAccionesCore, prepararAccionCore } from 'backend/akiraEjecutorLogic.web';
 
-const VERSION = '1.19.0';
+const VERSION = '1.19.1';
 const TAG = `[AkiraLogic][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -2863,30 +2880,46 @@ export const akiraAnotarAccion = webMethod(
 );
 
 /**
- * v1.19.0 — Candidatos de una elección, en corto, para la nota del historial.
+ * v1.19.1 — Candidatos de una elección, para la nota del historial.
  *
- * Se toma el primer identificador que traiga el candidato (`_id` de una
- * reserva, `contactId` de un contacto, `setupUid` de un servicio,
- * `wixResourceId` de un profesional) y la primera etiqueta legible. No sabe
- * de negocio: son los nombres de campo que ya usan las capacidades.
+ * El resultado de la herramienta no se guarda, así que los identificadores se
+ * perdían al acabar el turno. Esta línea los conserva.
+ *
+ * ⚠️ SIN NUMERAR, A PROPÓSITO. El orden de aquí es el de la búsqueda; el que
+ * ve el usuario es el que el modelo eligió al redactar. Numerar invitaba a
+ * mapear por posición, y con dos citas el mismo día eso preparó la acción
+ * sobre la cita equivocada. Se listan los datos que distinguen a cada
+ * candidato y se deja claro que el número lo resuelve el modelo contra su
+ * propia lista.
+ *
+ * Los nombres de campo son los que ya usan las capacidades: no hay negocio
+ * escrito aquí.
  */
 function _notaCandidatos(candidatos) {
   if (!Array.isArray(candidatos) || candidatos.length === 0) return '';
   const CLAVES_ID = ['_id', 'contactId', 'setupUid', 'wixResourceId', 'id'];
   const CLAVES_TXT = ['title', 'label', 'nombreCompleto', 'displayName', 'clientName', 'name'];
   const lineas = [];
-  candidatos.slice(0, 8).forEach((c, i) => {
-    if (!c || typeof c !== 'object') return;
+  for (const c of candidatos.slice(0, 8)) {
+    if (!c || typeof c !== 'object') continue;
     const id = CLAVES_ID.map(k => c[k]).find(v => v);
-    if (!id) return;
-    const txt = CLAVES_TXT.map(k => c[k]).find(v => v) || '';
-    const hora = c.horaMadrid ? ` ${c.horaMadrid}` : '';
-    lineas.push(`${i + 1}) ${txt}${hora} = ${id}`);
-  });
+    if (!id) continue;
+    const partes = [];
+    const txt = CLAVES_TXT.map(k => c[k]).find(v => v);
+    if (txt) partes.push(String(txt));
+    if (c.horaMadrid) partes.push(String(c.horaMadrid));
+    if (c.staffName) partes.push(String(c.staffName));
+    if (c.telefono) partes.push(String(c.telefono));
+    if (c.precioTotal != null) partes.push(`${c.precioTotal} €`);
+    if (c.price != null) partes.push(`${c.price} €`);
+    lineas.push(`${partes.join(' · ')} = ${id}`);
+  }
   if (!lineas.length) return '';
-  return ' Candidatos ofrecidos, con su identificador, en el mismo orden en que se enumeraron: ' +
-    lineas.join(' · ') +
-    '. Si el usuario elige por número o por nombre, manda el identificador que le corresponde.';
+  return ' Identificadores de los candidatos, SIN ORDEN: ' + lineas.join(' | ') +
+    '. Esta lista NO va en el mismo orden que la que enseñaste en pantalla. ' +
+    'Si el usuario contesta con un número, tradúcelo primero contra TU propia ' +
+    'enumeración y busca aquí ese mismo candidato por sus datos —hora, ' +
+    'servicio, importe— para tomar su identificador. Nunca por posición.';
 }
 
 function _log(campos) {
