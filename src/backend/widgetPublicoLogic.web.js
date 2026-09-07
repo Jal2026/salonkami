@@ -18,6 +18,16 @@
 //   prepararse jamás. Ahora una lista vacía o la palabra ninguno/nada/no/tal
 //   cual contestan que no a todos los opcionales de una vez.
 //
+// v0.11.9 — resolverInstanteMadrid. ADITIVO.
+//   `reprogramarReserva` recibe `nuevaFechaISO` y hace `new Date(...)`. Una
+//   cadena sin huso ('2026-09-18T11:00:00') la interpreta el runtime como
+//   hora LOCAL DEL SERVIDOR, que en Wix es UTC: la cita se movería a las
+//   13:00 de Madrid en verano y a las 12:00 en invierno, sin error visible.
+//   Y el desfase depende del horario de verano, que es un CÁLCULO y por tanto
+//   no puede quedar en manos del modelo.
+//   Esta función traduce día + HH:mm de Madrid al instante UTC exacto, con el
+//   mismo criterio de zona que ya usa el motor de huecos. No toca nada.
+//
 // v0.11.8 — UNA ETIQUETA MAL ESCRITA NO PUEDE COSTAR TRES VUELTAS.
 //   Medido en producción: con "corte mujer" la composición devolvió 0
 //   pendientes y 1 no reconocido. Correcto, pero inservible: al haberse
@@ -918,7 +928,7 @@
 import { Permissions, webMethod } from 'wix-web-module';
 import wixData from 'wix-data';
 
-const VERSION = '0.11.8';
+const VERSION = '0.11.9';
 const TAG = `[WidgetPublico][${VERSION}]`;
 
 // v0.10.0 — Prefijo de ordenación del nombre del personal.
@@ -3694,6 +3704,62 @@ export const getComposicionServicio = webMethod(
 
     } catch (e) {
       console.error(`${TAG} ❌ getComposicionServicio:`, e.message);
+      return { ok: false, version: VERSION, error: safeErr(e) };
+    }
+  }
+);
+
+// =====================================================
+// 6·bis · RESOLVER INSTANTE MADRID (v0.11.9) — ADITIVO
+// =====================================================
+//
+// Día (AAAA-MM-DD) + hora (HH:mm) de Madrid → instante UTC en ISO.
+// El desfase se mide preguntándole al propio runtime qué hora de Madrid
+// corresponde a un instante candidato, y corrigiendo. Dos pasadas bastan
+// para cualquier cambio de horario de verano.
+export const resolverInstanteMadrid = webMethod(
+  Permissions.SiteMember,
+  async ({ fecha, horaHHmm } = {}) => {
+    try {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(String(fecha || ''))) {
+        return { ok: false, version: VERSION, error: { message: 'fecha inválida (AAAA-MM-DD)' } };
+      }
+      const mm = /^(\d{1,2}):(\d{2})$/.exec(String(horaHHmm || '').trim());
+      if (!mm) {
+        return { ok: false, version: VERSION, error: { message: 'hora inválida (HH:mm)' } };
+      }
+      const h = Number(mm[1]), mi = Number(mm[2]);
+      if (h > 23 || mi > 59) {
+        return { ok: false, version: VERSION, error: { message: 'hora fuera de rango' } };
+      }
+
+      const objetivo = `${fecha} ${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}`;
+      const enMadrid = (d) => {
+        const ymd = d.toLocaleDateString('en-CA', { timeZone: 'Europe/Madrid' });
+        const hhmm = d.toLocaleTimeString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit', hour12: false });
+        return `${ymd} ${hhmm}`;
+      };
+
+      // Punto de partida: leer la cadena como si fuera UTC, y corregir el
+      // desfase que el propio runtime declare para ese instante.
+      let d = new Date(`${fecha}T${String(h).padStart(2, '0')}:${String(mi).padStart(2, '0')}:00.000Z`);
+      for (let i = 0; i < 3; i++) {
+        const actual = enMadrid(d);
+        if (actual === objetivo) break;
+        const deltaMin =
+          (Date.parse(`${objetivo.replace(' ', 'T')}:00.000Z`) -
+           Date.parse(`${actual.replace(' ', 'T')}:00.000Z`)) / 60000;
+        if (!deltaMin) break;
+        d = new Date(d.getTime() + deltaMin * 60000);
+      }
+
+      if (enMadrid(d) !== objetivo) {
+        return { ok: false, version: VERSION, error: { message: `No he podido situar ${objetivo} en el calendario de Madrid.` } };
+      }
+
+      return { ok: true, version: VERSION, fecha, horaHHmm: objetivo.slice(11), iso: d.toISOString() };
+    } catch (e) {
+      console.error(`${TAG} ❌ resolverInstanteMadrid:`, e.message);
       return { ok: false, version: VERSION, error: safeErr(e) };
     }
   }
