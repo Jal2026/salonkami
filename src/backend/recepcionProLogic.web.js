@@ -1303,7 +1303,7 @@ import wixData from 'wix-data';
 
 // v1.0.43 — la constante venía desfasada respecto a la cabecera (rezagada
 // en '1.0.41' mientras la cabecera ya documentaba v1.0.42). Se sincroniza.
-const VERSION = '1.0.55';
+const VERSION = '1.0.56';
 const TAG = `[RecepcionPRO][${VERSION}]`;
 const TIMEZONE = 'Europe/Madrid';
 
@@ -2812,6 +2812,18 @@ export const getReservasPorFecha = webMethod(
         family: item.family || '',
         wixAnclaId: item.wixAnclaId || '',
         fechaReserva: item.fechaReserva ? new Date(item.fechaReserva).toISOString() : '',
+        // v1.0.56 — ADITIVO. `fechaReserva` va en UTC, y quien la lea sin
+        // convertirla se equivoca en una o dos horas según el horario de
+        // verano. AKIRA leía el ISO tal cual y anunciaba las 08:00 de una
+        // cita de las 10:00. Se añaden el día y la hora ya en hora de Madrid,
+        // para que nadie tenga que calcular el desfase. Ningún consumidor
+        // existente se ve afectado: son dos claves nuevas.
+        fechaMadrid: item.fechaReserva
+          ? new Date(item.fechaReserva).toLocaleDateString('en-CA', { timeZone: TIMEZONE })
+          : '',
+        horaMadrid: item.fechaReserva
+          ? new Date(item.fechaReserva).toLocaleTimeString('es-ES', { timeZone: TIMEZONE, hour: '2-digit', minute: '2-digit', hour12: false })
+          : '',
         duracionTotal: toNum(item.duracionTotal),
         clientName: item.clientName || '',
         clientPhone: item.clientPhone || '',
