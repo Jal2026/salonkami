@@ -1,8 +1,30 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * KAMISUITE — AKIRA Backend (Wix Velo)
  * Archivo:  backend/akiraLogic.web.js
- * VERSION:  1.18.0
+ * VERSION:  1.19.0
  * FECHA:    7 Septiembre 2026
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * CAMBIOS v1.18.0 → v1.19.0 — LOS CANDIDATOS SOBREVIVEN AL TURNO
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ *   Caso real: dos citas de la misma clienta el mismo día, AKIRA las enumera,
+ *   el usuario dice "la 2" y AKIRA contesta que no encuentra esa cita y pide
+ *   el identificador exacto — justo lo que el usuario no tiene ni tiene por
+ *   qué tener.
+ *
+ *   Causa: los candidatos viajan en el RESULTADO DE LA HERRAMIENTA, y ese
+ *   resultado no se guarda en ninguna parte. Al turno siguiente el modelo
+ *   solo conserva su propio texto ("1. Peinado… 2. Tinte Raíz…"), que no
+ *   lleva identificadores, así que no puede traducir "la 2" a nada.
+ *
+ *   Ahora la nota del sistema que ya se escribía en el historial se los lleva
+ *   consigo: posición, etiqueta e identificador. La nota no se pinta —el
+ *   widget descarta los mensajes entre corchetes—, la lee solo el modelo.
+ *
+ *   Cubre TODOS los estados de elección, no solo las citas: cliente,
+ *   servicio, profesional, bloqueo. Cualquier parada que devuelva
+ *   `candidatos` queda resuelta.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * CAMBIOS v1.17.0 → v1.18.0 — LA TARJETA SOBREVIVE AL 504
@@ -745,7 +767,7 @@ import { cargarTodosContactos } from 'backend/recepcionLogic.web';
 // La ESCRITURA no está aquí: vive en ejecutarAccion, que llama el page code.
 import { listarAccionesCore, prepararAccionCore } from 'backend/akiraEjecutorLogic.web';
 
-const VERSION = '1.18.0';
+const VERSION = '1.19.0';
 const TAG = `[AkiraLogic][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -2089,7 +2111,14 @@ async function _callClaudeConHerramientas(model, apiKey, systemBlocks, messages,
             // para que el turno no se guarde como si la gestión hubiera
             // avanzado: el relato del modelo daba la cita por hecha y en el
             // turno siguiente lo leía como historial y lo repetía.
-            accionIncompleta = { accion: tu.name, estado: (prep && prep.estado) || 'error' };
+            accionIncompleta = {
+              accion: tu.name,
+              estado: (prep && prep.estado) || 'error',
+              // v1.19.0 — Se retienen para escribirlos en la nota del
+              // historial: sin ellos, elegir "la 2" al turno siguiente es
+              // imposible porque el modelo ya no tiene los identificadores.
+              candidatos: (prep && Array.isArray(prep.candidatos)) ? prep.candidatos : null
+            };
           }
           // Al modelo NO le viaja el payload interno: son identificadores que
           // no aportan a la conversación y gastan contexto. Ve el estado, el
@@ -2833,6 +2862,33 @@ export const akiraAnotarAccion = webMethod(
   }
 );
 
+/**
+ * v1.19.0 — Candidatos de una elección, en corto, para la nota del historial.
+ *
+ * Se toma el primer identificador que traiga el candidato (`_id` de una
+ * reserva, `contactId` de un contacto, `setupUid` de un servicio,
+ * `wixResourceId` de un profesional) y la primera etiqueta legible. No sabe
+ * de negocio: son los nombres de campo que ya usan las capacidades.
+ */
+function _notaCandidatos(candidatos) {
+  if (!Array.isArray(candidatos) || candidatos.length === 0) return '';
+  const CLAVES_ID = ['_id', 'contactId', 'setupUid', 'wixResourceId', 'id'];
+  const CLAVES_TXT = ['title', 'label', 'nombreCompleto', 'displayName', 'clientName', 'name'];
+  const lineas = [];
+  candidatos.slice(0, 8).forEach((c, i) => {
+    if (!c || typeof c !== 'object') return;
+    const id = CLAVES_ID.map(k => c[k]).find(v => v);
+    if (!id) return;
+    const txt = CLAVES_TXT.map(k => c[k]).find(v => v) || '';
+    const hora = c.horaMadrid ? ` ${c.horaMadrid}` : '';
+    lineas.push(`${i + 1}) ${txt}${hora} = ${id}`);
+  });
+  if (!lineas.length) return '';
+  return ' Candidatos ofrecidos, con su identificador, en el mismo orden en que se enumeraron: ' +
+    lineas.join(' · ') +
+    '. Si el usuario elige por número o por nombre, manda el identificador que le corresponde.';
+}
+
 function _log(campos) {
   return wixData.insert(C_LOG, {
     timestamp: new Date(),
@@ -3024,7 +3080,7 @@ export async function askAkiraCore({ sessionId, query, userId, userName, modo })
       textoHistorial = `[Acción "${propuesta.accion}" preparada y pendiente de confirmación del usuario. Todavía no se ha ejecutado nada.]`;
     } else if (accionIncompleta) {
       textoHistorial = respuesta;
-      notaSistema = `[Acción "${accionIncompleta.accion}" NO ejecutada. Estado: ${accionIncompleta.estado}. No se ha creado, modificado ni guardado nada en el salón. La pregunta anterior es tuya y está sin contestar: cuando el usuario responda, vuelve a llamar a la acción con ese dato añadido a los que ya tenías.]`;
+      notaSistema = `[Acción "${accionIncompleta.accion}" NO ejecutada. Estado: ${accionIncompleta.estado}. No se ha creado, modificado ni guardado nada en el salón. La pregunta anterior es tuya y está sin contestar: cuando el usuario responda, vuelve a llamar a la acción con ese dato añadido a los que ya tenías.${_notaCandidatos(accionIncompleta.candidatos)}]`;
     } else {
       textoHistorial = respuesta;
     }
