@@ -2,7 +2,7 @@
  * KAMISUITE — AKIRA Console (Wix Custom Element)
  * Archivo:  public/custom-elements/akiraConsole.js
  * Tag name: akira-console
- * VERSION:  1.6.0
+ * VERSION:  1.7.0
  * FECHA:    20 Agosto 2026
  *
  * CAMBIOS v1.5.0 → v1.5.1 — LAS NOTAS INTERNAS NO SE PINTAN.
@@ -1382,9 +1382,16 @@
         return;
       }
       if (res && res.ok) {
+        // v1.7.0 — El texto lo pone la capacidad, no este archivo. "Queda
+        // guardada" valía para reservar y sonaba absurdo al cancelar, al
+        // cobrar o al mover. Viene en `textoHecho` desde su fila; si esa fila
+        // no lo trae, se dice algo que sirve para cualquier acción.
         this._cerrarPropuesta(el, 'Hecho.');
         this._propuestaDatos = null;
-        this._appendAssistant('Listo, la cita queda guardada.', true);
+        const hecho = (res && typeof res.textoHecho === 'string' && res.textoHecho.trim())
+          ? res.textoHecho.trim()
+          : 'Listo, ya está hecho.';
+        this._appendAssistant(hecho, true);
         this._emit('akira-load-chats', {});
         return;
       }
