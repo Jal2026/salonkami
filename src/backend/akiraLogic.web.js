@@ -1,8 +1,41 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * KAMISUITE — AKIRA Backend (Wix Velo)
  * Archivo:  backend/akiraLogic.web.js
- * VERSION:  1.16.0
+ * VERSION:  1.17.0
  * FECHA:    7 Septiembre 2026
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * CAMBIOS v1.16.0 → v1.17.0 — LA PREGUNTA DE AKIRA VUELVE AL HISTORIAL
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ *   ESTA ES LA CAUSA DEL BUCLE DE `faltan_datos`. Verificado en AkiraMessages
+ *   (sesiones ecc28f3f y 5a7fda0d del 6-7 sep): seis y catorce turnos seguidos
+ *   devolviendo el mismo estado mientras el usuario contestaba a todo.
+ *
+ *   v1.15.0 dejó de guardar el texto del modelo cuando la acción NO llegaba a
+ *   ejecutarse, y guardaba en su lugar una nota del sistema. Pero ese texto no
+ *   era un relato falso: era LA PREGUNTA. "¿A nombre de quién?", "¿cuál de las
+ *   dos mechas?". El usuario la veía en pantalla —eso nunca falló— y la
+ *   contestaba; el modelo, en el turno siguiente, leía un historial donde su
+ *   propio turno era un corchete sin pregunta. La respuesta del usuario
+ *   ("corte mujer", "sí", "solo tinte raíz") quedaba colgando de una pregunta
+ *   que ya no existía en su contexto, así que volvía a llamar a la acción con
+ *   los mismos parámetros incompletos. Bucle estructural, no de redacción.
+ *
+ *   Ahora, cuando la acción se queda a medias, se guardan LOS DOS mensajes:
+ *   la respuesta real del modelo (la pregunta) y, detrás, la nota del sistema
+ *   diciendo que no se ejecutó nada. La nota sigue impidiendo que dé la cita
+ *   por hecha; la pregunta permite que la conversación avance.
+ *
+ *   Con PROPUESTA no cambia nada: ahí el widget pinta la tarjeta y NO el
+ *   texto, así que guardar ese texto haría reaparecer al reabrir el chat un
+ *   "¡Hecho! Cita reservada" que nunca estuvo en pantalla. Sigue guardándose
+ *   solo la nota.
+ *
+ *   `_guardarMensajes` acepta una nota opcional que se inserta como un tercer
+ *   mensaje del asistente. El widget ya descarta los mensajes íntegramente
+ *   entre corchetes al repintar un chat (akiraConsole v1.5.1), así que la nota
+ *   no se ve.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * CAMBIOS v1.15.1 → v1.16.0 — RECEPCIÓN DEJA DE HEREDAR LA CONDUCTA DEL ASESOR
@@ -679,7 +712,7 @@ import { cargarTodosContactos } from 'backend/recepcionLogic.web';
 // La ESCRITURA no está aquí: vive en ejecutarAccion, que llama el page code.
 import { listarAccionesCore, prepararAccionCore } from 'backend/akiraEjecutorLogic.web';
 
-const VERSION = '1.16.0';
+const VERSION = '1.17.0';
 const TAG = `[AkiraLogic][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -2678,7 +2711,7 @@ async function _getHistorial(sessionId) {
  * Guarda el turno. READ-MERGE-UPDATE obligatorio en la sesión:
  * wixData.update REEMPLAZA el documento entero (Conceptos Fundacionales).
  */
-async function _guardarMensajes(sessionId, query, respuesta) {
+async function _guardarMensajes(sessionId, query, respuesta, notaSistema) {
   const res = await wixData.query(C_MESSAGES)
     .eq('sessionRef', sessionId)
     .descending('orden')
@@ -2694,12 +2727,21 @@ async function _guardarMensajes(sessionId, query, respuesta) {
     sessionRef: sessionId, rol: 'assistant', contenido: respuesta, orden: orden + 1, timestamp: now
   }, AUTH);
 
+  // v1.17.0 — Nota del sistema DETRÁS de la respuesta, no en su lugar. Va como
+  // mensaje aparte y entre corchetes: el widget descarta los mensajes que lo
+  // son por completo, y el modelo la lee como el último hecho del turno.
+  if (notaSistema) {
+    await wixData.insert(C_MESSAGES, {
+      sessionRef: sessionId, rol: 'assistant', contenido: notaSistema, orden: orden + 2, timestamp: now
+    }, AUTH);
+  }
+
   try {
     const sesion = await wixData.get(C_SESSIONS, sessionId, AUTH);
     if (sesion) {
       const merged = { ...sesion };
       merged.fechaActualizacion = now;
-      merged.messageCount = (Number(sesion.messageCount) || 0) + 2;
+      merged.messageCount = (Number(sesion.messageCount) || 0) + (notaSistema ? 3 : 2);
       await wixData.update(C_SESSIONS, merged, AUTH);
     }
   } catch (e) {
@@ -2908,23 +2950,34 @@ export async function askAkiraCore({ sessionId, query, userId, userName, modo })
       return { ok: false, error: 'No he podido generar respuesta. Reformula la pregunta.' };
     }
 
-    // v1.13.1 — Con una acción preparada, en el historial NO se guarda el
+    // v1.13.1 — Con una acción PREPARADA, en el historial NO se guarda el
     // relato del modelo. Llegó a escribir "¡Hecho! Cita reservada" con la
     // tarjeta sin confirmar y sin que nadie hubiera tocado la agenda; si ese
-    // texto queda guardado, reaparece al reabrir el chat y además vuelve al
-    // modelo como contexto, que da la reserva por hecha en el turno
-    // siguiente. Se guarda una línea del SISTEMA. Lo que sí ocurrió lo anota
-    // akiraAnotarAccion cuando la escritura devuelve ok.
-    const textoHistorial = propuesta
-      ? `[Acción "${propuesta.accion}" preparada y pendiente de confirmación del usuario. Todavía no se ha ejecutado nada.]`
-      : (accionIncompleta
-          // v1.15.0 — La acción se llamó y NO se completó (${estado}). Guardar
-          // aquí el texto del modelo es lo que hacía que la mentira se
-          // consolidara: al turno siguiente leía escrito por él mismo que la
-          // cita estaba creada, y lo repetía con más seguridad todavía.
-          ? `[Acción "${accionIncompleta.accion}" NO ejecutada. Estado: ${accionIncompleta.estado}. No se ha creado, modificado ni guardado nada en el salón. Falta información o hay algo que decidir antes de poder hacerlo.]`
-          : respuesta);
-    await _guardarMensajes(effectiveSessionId, String(query), textoHistorial);
+    // texto queda guardado, reaparece al reabrir el chat —donde el widget
+    // pinta la tarjeta, no el texto— y además vuelve al modelo como contexto,
+    // que da la reserva por hecha en el turno siguiente. Se guarda una línea
+    // del SISTEMA. Lo que sí ocurrió lo anota akiraAnotarAccion cuando la
+    // escritura devuelve ok.
+    //
+    // v1.17.0 — Con una acción A MEDIAS es al revés: el texto del modelo NO es
+    // un relato, es la pregunta que falta por contestar, y el usuario ya la ha
+    // leído en pantalla. Tirarla dejaba al modelo sin saber qué había
+    // preguntado y convertía cada respuesta del usuario en otra llamada con
+    // los mismos parámetros incompletos. Se guardan los dos: la pregunta y,
+    // detrás, la nota que impide darla por ejecutada.
+    let textoHistorial;
+    let notaSistema = null;
+
+    if (propuesta) {
+      textoHistorial = `[Acción "${propuesta.accion}" preparada y pendiente de confirmación del usuario. Todavía no se ha ejecutado nada.]`;
+    } else if (accionIncompleta) {
+      textoHistorial = respuesta;
+      notaSistema = `[Acción "${accionIncompleta.accion}" NO ejecutada. Estado: ${accionIncompleta.estado}. No se ha creado, modificado ni guardado nada en el salón. La pregunta anterior es tuya y está sin contestar: cuando el usuario responda, vuelve a llamar a la acción con ese dato añadido a los que ya tenías.]`;
+    } else {
+      textoHistorial = respuesta;
+    }
+
+    await _guardarMensajes(effectiveSessionId, String(query), textoHistorial, notaSistema);
 
     const totalMs = Date.now() - tIn;
     _log({ query, respuesta, modo, modeloUsado, consultas, prepMs, apiMs, totalMs, cacheStats });
