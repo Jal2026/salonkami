@@ -1,0 +1,3616 @@
+// =====================================================
+// KAMISUITE — Backend: Widget Público de Reservas
+// =====================================================
+// VERSION: 0.11.5
+//
+// v0.11.4 — SE DICE SI ALGO ES OBLIGATORIO O NO.
+//   La respuesta no decía en ninguna parte si lo que faltaba se podía omitir.
+//   Había que deducirlo de una lista, y se acabó diciéndole al usuario que el
+//   sistema exigía elegir complementos cuando ninguno era obligatorio. Ahora
+//   viaja `hayObligatorios`, `sePuedeOmitirTodo` y cómo omitirlos. Y el log
+//   distingue obligatorias de opcionales, que antes iban en un mismo total.
+//
+// v0.11.3 — SE PUEDE DECIR QUE NO.
+//   v0.11.1 hizo bloqueante cualquier decisión sin contestar, pero no dejó
+//   forma de contestar "ninguno": el usuario decía "tal cual", la llamada
+//   volvía sin complementos, y eso se leía otra vez como "sin contestar".
+//   Bucle cerrado: la composición nunca se resolvía y la reserva no llegaba a
+//   prepararse jamás. Ahora una lista vacía o la palabra ninguno/nada/no/tal
+//   cual contestan que no a todos los opcionales de una vez.
+//
+// v0.11.2 — LO OPCIONAL SE OFRECE, NO SE RECITA.
+//   Se devolvían todos los complementos con precios y duraciones, y la
+//   conversación se convertía en una tabla. Ahora lo obligatorio va entero y
+//   lo opcional solo con el nombre, en `opcionales`. El detalle sigue ahí, en
+//   `detalleOpcionales`, para quien lo pida.
+//
+// v0.11.1 — LA COMPOSICIÓN NO SE CIERRA SOLA.
+//   getComposicionServicio daba por cerrada la composición cuando no faltaba
+//   nada OBLIGATORIO. Los complementos opcionales sin contestar se tomaban
+//   como un "no" y ni se ofrecían. Resultado: AKIRA reservaba un tinte sin
+//   preguntar variante ni complementos, cosa que la pantalla nunca hace.
+//   Ahora cualquier decisión sin contestar deja la composición abierta y se
+//   devuelve para preguntarla. Solo afecta a getComposicionServicio, que hoy
+//   no usa nadie más.
+//
+// v0.11.0 — LA COMPOSICIÓN DE LA CITA BAJA AL BACKEND.
+//   ADITIVO PURO. No se toca ni una línea de ninguna función existente:
+//   getCategoriasPublicas, getServiciosCategoria, getProfesionalesPublicos,
+//   getSalonConfig, getHuecosDisponibles y crearReservaPublica quedan
+//   exactamente como en v0.10.0, y el bundle público sigue calculando por
+//   su cuenta como hasta hoy. Nadie consume lo nuevo todavía.
+//
+//   QUÉ SE AÑADE: getComposicionServicio (+ sus helpers y la constante
+//   USOS_INTERNOS). Devuelve, para un servicio, lo que hoy arma el
+//   navegador: qué hay que elegir (variantes, complementos, grupos) y,
+//   una vez elegido, cuánto dura y cuánto cuesta la cita completa, con el
+//   payload ya montado para reservar.
+//
+//   POR QUÉ: `durationMin` —la cifra que gobierna qué horas se ofrecen y
+//   con qué bloque se valida al crear— se calcula en `_calc()` del bundle,
+//   dentro del navegador. Cualquier superficie sin pantalla (AKIRA en la
+//   consola interna, y mañana WhatsApp o teléfono) no puede llegar ahí.
+//   La alternativa era reescribir esa cuenta fuera, que es garantizar que
+//   un día se separen: el mismo fallo del Lavado perdido (v0.9.8) pero
+//   permanente y por duplicado. Se baja aquí una sola vez.
+//
+//   La aritmética es la del bundle v2.0.19, literal. La resolución de
+//   catálogo llama a `adaptarServicio` sin modificarlo.
+//
+// v0.10.0 — EL NOMBRE QUE SE GUARDA EN LA RESERVA VA LIMPIO.
+//   El nombre del personal admite un prefijo de ordenación de la forma
+//   `X_` (una letra y un guion bajo) que nunca debe verse. Recepción PRO
+//   y el catálogo consultivo ya lo quitaban al leer StaffConfig; este
+//   motor no, así que toda reserva web hecha con "cualquier profesional"
+//   —o con un segundo profesional para los complementos— quedaba grabada
+//   con el nombre prefijado.
+//
+//   Consecuencia visible: la misma empleada salía dos veces, como
+//   "Angela" y "C_Angela", en el rendimiento por profesional del informe
+//   del día y del correo de resumen diario, con sus citas y su dinero
+//   partidos entre las dos filas.
+//
+//   Se limpia en los tres puntos donde este motor resuelve un nombre de
+//   StaffConfig, con la misma expresión que ya usa Recepción PRO. No
+//   cambia nada más: ni la elección de profesional, ni el cálculo de
+//   huecos, ni el reparto de fases, ni el precio. Solo el texto que se
+//   graba y el que viaja al email y al WhatsApp de confirmación.
+//
+//   El histórico ya grabado no se reetiqueta: lo corrige al leer
+//   cierreLogicExtendido v1.3.1.
+//
+// v0.9.9 — QUE NINGÚN MINUTO VUELVA A PERDERSE EN SILENCIO.
+//   No cambia ni un solo comportamiento: no toca el cálculo, ni el filtro
+//   de huecos, ni la oferta, ni lo que ve el cliente. Solo deja rastro.
+//
+//   1) FASE SIN RESOLVER → AVISO EN EL LOG. Los dos `if (!svc) continue`
+//      de calcularBaseDurationCascada y calcularDurPrincipalCascada se
+//      saltaban un `ref` no encontrado sin decir nada. Así se perdió el
+//      Lavado desde julio hasta el 5-sep-2026 sin que nadie lo viera.
+//      Con v0.9.8 el índice ya no filtra por uso, así que hoy resuelven
+//      todos; pero el silencio seguía ahí para el día que alguien
+//      desactive un lavado, borre un servicio usado como fase o monte un
+//      servicio nuevo con un ref mal escrito. Ahora se dice, con el
+//      nombre del servicio y el ref, y se ve el mismo día.
+//
+//   2) LA LÍNEA DE RESERVA CREADA DICE QUÉ RECIBIÓ. Antes escribía solo
+//      reservaId e importe. Con eso es imposible reconstruir a posteriori
+//      con qué hora y con qué duración se creó una cita, que es
+//      exactamente lo que faltó para cerrar el desfase de 15 min del
+//      5-sep-2026 (cita ofrecida a las 13:00 como último hueco posible y
+//      creada a las 13:15). Ahora la línea incluye fecha, hora, duración
+//      recibida y profesional(es), en el mismo formato que la línea de
+//      huecos, para poder comparar las dos de un vistazo.
+//
+// v0.9.8 — ⛔ LAS FASES INCLUIDAS NO SUMABAN EN LA DURACIÓN.
+//   BUG DE PRODUCCIÓN (5-sep-2026, Hair-Times): cita online de Tinte Raiz
+//   + Corte Mujer (Complemento) para el sábado a las 13:15, con cierre a
+//   las 14:00. El motor midió 65 min; la cita ocupó 85 y terminó a las
+//   14:40, cuarenta minutos después de cerrar.
+//
+//   CAUSA. `calcularBaseDurationCascada` y `calcularDurPrincipalCascada`
+//   resuelven cada `ref` del mapeoFases contra un índice de servicios.
+//   Ese índice se construía a partir del catálogo YA filtrado por
+//   `USOS_PUBLICOS`. Las fases incluidas —Lavado (15'), Secado (15'),
+//   Lavado y neutralizado (30')— llevan uso='kamisuite' por diseño,
+//   porque no se venden sueltas. No estaban en el índice, `porSetupUid[f.ref]`
+//   devolvía undefined, y el `if (!svc) continue` se las saltaba sin un
+//   solo aviso en el log. El Tinte Raiz medía 45 (15 aplicación + 30
+//   proceso) en vez de 60.
+//
+//   ALCANCE. Siete servicios activos de Hair-Times arrastran fases con
+//   uso='kamisuite': Tinte Raiz, Tinte Completo, Tinte Vegetal, Tinte
+//   Hombre, Mechas Medias Personalizadas, Mechas Completas Personalizadas
+//   y MOLDEADO. Seis con lavado OBLIGATORIO. Toda reserva online de color
+//   se venía calculando con 15 min de menos (30 en MOLDEADO). Sólo se hacía
+//   visible pegado al cierre; el resto del día se comía el hueco siguiente.
+//   No es un dato mal puesto en un salón: la regla está en el código y
+//   afecta a cualquier salón cuyo catálogo use fases internas.
+//
+//   ARREGLO — DOS ÍNDICES, no uno:
+//     · `porSetupUid`      → catálogo activo de uso público. Sigue
+//       alimentando `complements` en adaptarServicio, es decir, lo que el
+//       cliente VE en pantalla. Intacto.
+//     · `porSetupUidFases` → catálogo activo COMPLETO, sin filtro de uso.
+//       Sólo resuelve los `ref` del mapeoFases para medir la cascada.
+//   Abrir un único índice habría hecho aparecer Lavado, Secado y los
+//   complementos de mechas como casillas marcables en el widget público
+//   (están en `it.complementos` de Tinte Raiz, Tinte Completo y MOLDEADO).
+//   Por eso van separados.
+//
+//   TRES PUNTOS CORREGIDOS, todos con el mismo defecto:
+//     1) getServiciosCategoria → nuevo `porSetupUidFases`, pasado a
+//        adaptarServicio, que lo usa sólo para `baseDuration`.
+//     2) getHuecosDisponibles, bloque 3-bis (modo dos tramos) → la query
+//        del índice deja de filtrar por uso.
+//     3) resolverDurPrincipalTramo (guardia de crearReservaPublica) → ídem,
+//        para que la guardia mida el corte igual que el motor.
+//
+//   NO SE TOCA: el filtro de oferta al público, los complementos visibles,
+//   el filtro de cierre, el margen de extensión, la antelación mínima de
+//   v0.9.7 ni el reparto entre dos profesionales.
+//
+//   PENDIENTE, aparte de esto: la cita se aceptó a las 13:15 cuando ni
+//   siquiera con 65 min cabía (el bucle corta en 13:00). Hay un desajuste
+//   de 15 min todavía sin identificar entre la hora ofrecida y la hora
+//   creada. Con esta corrección deja de tener efecto práctico —la cita ya
+//   no se ofrece a ninguna hora que desborde el cierre— pero sigue vivo.
+//
+// v0.9.7 — ⛔ NO SE PUEDE RESERVAR EN EL PASADO (antelación mínima).
+//   BUG DE PRODUCCIÓN (28-ago-2026, Hair-Times): a las 19:21 el widget
+//   público ofreció y aceptó una cita para HOY a las 19:15. El motor de
+//   huecos generaba los slots del día desde la apertura hasta el cierre
+//   SIN comparar nunca con la hora actual, y crearReservaPublica tampoco
+//   exigía que la fecha/hora fuese futura. Ni el bundle ni el page code
+//   filtraban por su cuenta. Existía desde el origen del motor.
+//
+//   TRES PIEZAS:
+//   (a) `leerConfigMotor()` sustituye a `leerClosingGraceMin()`: MISMA
+//       query única a SalonConfig, ahora devuelve { graceMin, bufferMin }.
+//       Evita una segunda lectura de SalonConfig por invocación (el
+//       diagnóstico de rendimiento del 26-ago midió ~341 ms por llamada).
+//   (b) getHuecosDisponibles: si la fecha pedida es HOY (Europe/Madrid),
+//       se descartan los slots cuyo inicio sea anterior a `ahora +
+//       bookingBufferMinutes`. Si la fecha es ANTERIOR a hoy → 0 huecos.
+//       El bucle sigue arrancando en minFrom: la rejilla de horas no se
+//       desplaza, solo se filtran los slots ya pasados.
+//   (c) crearReservaPublica: guardia defensiva con el mismo criterio,
+//       ANTES de tocar catálogo, staff o CMS. Protege contra payloads
+//       rezagados (pestaña abierta hace una hora) y manipulados.
+//
+//   `bookingBufferMinutes` (Número) en SalonConfig — minutos de antelación
+//   mínima exigidos a una reserva ONLINE. Vacío / null / no numérico /
+//   error de lectura → 15 (BUFFER_DEFAULT_MIN). 0 explícito → solo se
+//   bloquea el pasado estricto. Requiere salonConfigLogic v1.0.11.
+//
+//   ALCANCE: solo la vía ONLINE. Recepción PRO (Desktop, Móvil y Lite)
+//   NO se toca — ahí la decisión es manual del salón y anotar una cita
+//   ya empezada es legítimo. El Área de Cliente ("mover cita") hereda
+//   la protección sin cambios: getHuecosCambioReserva y moverCitaCliente
+//   (clienteAreaLogic v1.6.6) delegan ambas en getHuecosDisponibles,
+//   tanto para ofrecer los huecos como para revalidar antes de mover.
+//
+// v0.9.6 — El catálogo público dice si el servicio se vende en bono.
+//   Nuevo campo `tieneBono` (Boolean) en cada servicio devuelto por
+//   getServiciosCategoria, leído de ServiceCatalog.bonoActivo.
+//   Es un dato del SERVICIO, no del visitante: no se consulta ninguna
+//   colección de bonos emitidos ni se identifica a nadie. El widget lo usa
+//   para mostrar, justo antes del botón de reservar, un recordatorio de
+//   repasar las condiciones del bono a quien lo tenga.
+//   Aditivo puro: ni disponibilidad, ni precios, ni complementos, ni
+//   variantes, ni el resto del catálogo cambian.
+// FECHA: 20 de agosto de 2026
+//
+// v0.9.5: 🔗 SLUG CODIFICADO EN URL.
+//    El CMS puede guardar el enlace de la categoría con los acentos
+//    codificados ("/servicios/depilaci%C3%B3n-laser") mientras el navegador
+//    entrega el slug ya descodificado ("depilación-laser"). No es el caso
+//    NFC/NFD de v0.9.2: son dos representaciones distintas del mismo texto.
+//    Confirmado en el log de Hair-Times el 20-ago, con la lista de slugs
+//    disponibles que añadió v0.9.2:
+//      Disponibles: [depilaci%C3%B3n-laser | moldeados | spa-capilar | …]
+//    Ahora slugNFC y slugPlano descodifican antes de comparar
+//    (decodeSeguro: decodeURIComponent con red por si la cadena tiene un
+//    porcentaje que no forma una secuencia válida).
+//
+// v0.9.4: 🩹 EL FILTRO DE CATÁLOGO DEJA DE SER LITERAL.
+//    getServiciosCategoria filtraba en la propia consulta con
+//    .eq('active', true) y .hasSome('uso', USOS_PUBLICOS). Eso exige el
+//    dato perfecto: una fila con `active` VACÍO (no false: vacío) o con
+//    `uso` escrito "Ambos" o "ambos " quedaba fuera de la consulta y el
+//    servicio desaparecía de la web pública, aunque en el editor se viera
+//    correcto y activo. Sin ningún rastro.
+//
+//    CASO REAL (Hair-Times, 20-ago): el grupo SPA CAPILAR no aparecía
+//    siquiera entre los grupos devueltos por la consulta, pese a existir
+//    el servicio, estar activo y tener rol principal.
+//
+//    AHORA se carga el catálogo y se filtra en código: activo salvo que
+//    esté explícitamente en false, y uso comparado sin espacios ni
+//    mayúsculas. Las filas admitidas por esta tolerancia se listan en el
+//    log (con su active y su uso) para poder sanear el dato con calma.
+//
+//    + Si aun así el grupo sale vacío, el log busca el grupo en el
+//    catálogo COMPLETO y dice campo por campo por qué quedó fuera cada
+//    servicio.
+//
+// v0.9.3: 🔎 DIAGNÓSTICO DE CATEGORÍA VACÍA.
+//    Cuando getServiciosCategoria resuelve el grupo pero no encuentra
+//    ningún servicio, el log lista ahora TODOS los valores de group que
+//    han entrado en la consulta (los de servicios con active=true y uso
+//    público/ambos). Sirve para distinguir sin ambigüedad dos causas que
+//    hasta ahora daban el mismo síntoma:
+//      · el grupo buscado NO aparece en la lista → el servicio queda fuera
+//        de la consulta (inactivo o uso no público).
+//      · el grupo buscado SÍ aparece → el servicio entra en la consulta y
+//        el fallo está en el emparejado del valor del campo.
+//    Solo añade líneas de log. Cero cambios de comportamiento respecto a
+//    v0.9.2.
+//
+// v0.9.2: 🔤 SLUG DE CATEGORÍA A PRUEBA DE TILDES.
+//    getServiciosCategoria comparaba el slug de la URL con el del CMS con
+//    igualdad estricta de cadenas. Una "ó" puede venir codificada de dos
+//    formas distintas que se imprimen idénticas: precompuesta (un solo
+//    carácter, NFC) o descompuesta (o + tilde combinante, NFD). El
+//    navegador y el CMS no tienen por qué coincidir.
+//
+//    CASO REAL (Hair-Times, 20-ago): la categoría "Depilación Laser" —la
+//    única de las catorce con tilde en el enlace, /servicios/depilación-
+//    laser— devolvía «groupCatalog no resuelto (slug=depilación-laser)»
+//    aunque la categoría existía, estaba activa y su groupCatalog
+//    coincidía con el group de los servicios. La página pública se quedaba
+//    cargando indefinidamente.
+//
+//    AHORA la comparación se hace en tres pasadas, de más estricta a más
+//    tolerante: (1) normalizada NFC, (2) NFC en minúsculas, (3) sin tildes
+//    y en minúsculas. La primera que casa gana. Si ninguna casa, el log
+//    lista los slugs disponibles para poder diagnosticarlo de un vistazo
+//    en vez de a ciegas.
+//
+//    + El group del servicio y el groupCatalog de la categoría se comparan
+//    también por clave normalizada (sin tildes, sin dobles espacios, sin
+//    distinguir mayúsculas): se teclean en dos pantallas distintas y un
+//    espacio de más dejaba la categoría vacía sin dejar rastro. Y si el
+//    grupo SÍ tiene servicios pero ninguno con rol principal/ambos, el log
+//    lo dice con nombre y rol de cada uno.
+//
+//    Alcance: resolución del slug y emparejado de grupos. No se toca
+//    USOS_PUBLICOS, TIPOS_PRINCIPALES, adaptarServicio, ni ninguna otra
+//    función del backend.
+//
+// v0.9.1: 📨 COMPLEMENTOS Y SU PROFESIONAL EN LA CONFIRMACIÓN AL CLIENTE.
+//    Hasta ahora el mensaje decía solo el servicio principal y el
+//    profesional principal: una cita "Tinte Completo + Corte de pelo con
+//    Ricardo y Alejandra" llegaba al cliente como "Tinte Completo /
+//    Ricardo", perdiendo la mitad de la información.
+//
+//    La plantilla de WhatsApp (whatsappLogic → TEMPLATE_CONFIRMACION) usa
+//    8 parámetros POSICIONALES aprobados por Meta ({{1}} nombreCliente,
+//    {{2}} brandName, {{3}} servicios, {{4}} estilista, {{5}} fechaHora,
+//    {{6}} address, {{7}} invoiceEmail, {{8}} phone). Un {{9}} nuevo
+//    exigiría plantilla nueva y aprobación de Meta, así que la información
+//    se incorpora dentro de {{3}} y {{4}}:
+//        📌 Servicio: Tinte Completo + Corte de pelo
+//        👤 Personal: Ricardo · Corte de pelo con Alejandra
+//
+//    Fuente: `resultado.fases`, ya con el reparto de v0.9.0 aplicado. Solo
+//    se listan las fases 'COMPLEMENTO' (las que el cliente eligió); las
+//    INCLUIDAS de cascada (lavado, secado) NO se listan porque no las
+//    eligió y van embebidas en el precio del servicio.
+//
+//    Sin complementos, o sin segundo profesional, el texto queda
+//    EXACTAMENTE igual que en v0.9.0. Las mismas cadenas alimentan el
+//    email (variables `servicios` / `profesional`), así que ambos canales
+//    quedan cubiertos con un solo cambio. Todo se normaliza a una línea:
+//    los parámetros de plantilla de WhatsApp no admiten saltos de línea
+//    ni espacios múltiples.
+// ARCHIVO: backend/widgetPublicoLogic.web.js
+//
+// v0.9.0: 👥 SEGUNDO PROFESIONAL PARA LOS COMPLEMENTOS (recuperación de
+//    una capacidad que existía en V1 y nunca se cableó en V2).
+//
+//    ─── QUÉ SE RECUPERA ───
+//    En V1 (`coloracionLogic.web.js`, aún en el repo) el cliente podía
+//    reservar el servicio principal con un profesional y los extras con
+//    otro. Dos piezas lo sostenían:
+//      · `consultarDisponibilidadUnificada` (línea 853) recibía `staff2Id`
+//        y consultaba TRAMO A con staffPrimary y TRAMO B con staffSecondary
+//        en paralelo, cruzando ambos conjuntos de slots por la hora exacta
+//        de fin de PROCESO.
+//      · `confirmarEnCalendario` (línea 1629) recibía `empleado2Id` →
+//        `extrasStaffId`, y la línea 1854 repartía:
+//          `staffParaFase = fase.fase === 'LAVADO' ? empleadoIdReal : extrasStaffId`
+//        es decir: el LAVADO se quedaba con el principal y todo el resto
+//        del tramo posterior al proceso iba al segundo.
+//
+//    En V2 el widget bundle CONSERVA la UI completa (state.proExtra,
+//    state.sameExtra, _renderProExtra, fila "Compl. con" del resumen)
+//    pero estaba oculta porque `adaptarServicio` emitía
+//    `requiresExtraPro: false` HARDCODEADO (deuda declarada en el propio
+//    comentario del archivo). Además el bundle nunca enviaba el segundo
+//    profesional en ninguno de los dos emits. Esta versión cierra la deuda.
+//
+//    ─── (A) requiresExtraPro REAL ───
+//    `adaptarServicio` deja de clavar `false`: emite
+//    `requiresExtraPro = complements.length > 0`. Sin complementos no hay
+//    nada que repartir → el bloque no se pinta. El bundle v2.0.17 añade
+//    una segunda condición por encima de ésta: solo lo muestra cuando el
+//    cliente ha MARCADO al menos un complemento.
+//
+//    ─── (B) REGLA DE REPARTO (decidida por Jal, 3-ago-2026) ───
+//    UN SOLO segundo profesional (no uno por complemento), que se lleva
+//    todo el tramo posterior al proceso SALVO el lavado. Traducción
+//    estructural a V2, donde la etiqueta 'LAVADO' de V1 no existe:
+//
+//      · CON PROCESO → el tramo del principal termina al acabar la
+//        PRIMERA fase que ocupa después del PROCESO. Esa fase es
+//        exactamente lo que en V1 era el lavado (el TRAMO B de V1
+//        arrancaba en `ids.lavado || ids.final`, la única pieza que V1
+//        devolvía al principal). Todo lo posterior → segundo.
+//        Ejemplo Tinte Raíz + Corte Mujer de complemento:
+//          Principal: aplicación → proceso → lavado
+//          Segundo:   secado → corte
+//
+//      · SIN PROCESO → el tramo del principal termina justo ANTES del
+//        primer bloque elegible por el cliente (tipo:'servicio' NO
+//        obligatorio, tipo:'exclusivo', o CASO B con variantes). Los
+//        complementos elegidos, y lo que venga detrás de ellos, → segundo.
+//        NOTA EXPLÍCITA PARA JAL: si un salón coloca en el mapeoFases una
+//        fase INCLUIDA obligatoria DESPUÉS de un complemento opcional, esa
+//        incluida cae en el tramo del segundo. Es la consecuencia de
+//        mantener UN ÚNICO punto de corte temporal (dos tramos contiguos),
+//        que es lo que hacía V1 y lo único que el motor de disponibilidad
+//        puede validar sin fragmentar la cita. Si se prefiere otro
+//        criterio, se cambia solo `calcularDurPrincipalCascada`.
+//
+//    El corte SIEMPRE cae en piezas base (nunca dentro de un complemento
+//    elegible), por lo que `durPrincipal` se calcula exacto en backend sin
+//    conocer las variantes elegidas, y `durExtra = durationMin - durPrincipal`
+//    usando la duración total que el bundle ya calcula (con variantes).
+//
+//    ─── (C) NUEVO HELPER `calcularDurPrincipalCascada` ───
+//    Hermano de `calcularBaseDurationCascada` (v0.8.0): mismo recorrido
+//    del mapeoFases y mismo criterio literal de `construirFasesPack`, pero
+//    se detiene en el punto de corte definido arriba. Sin mapeoFases
+//    (servicio simple) → `it.duration` (todo el principal, los
+//    complementos encolados detrás van al segundo).
+//
+//    ─── (D) getHuecosDisponibles: DOS TRAMOS ───
+//    Acepta `proExtraId` y `principalSetupUid`. Si `proExtraId` no llega,
+//    es 'any', o coincide con `proId` → CAMINO ACTUAL BYTE A BYTE. Si
+//    llega distinto:
+//      · durPrincipal ← calcularDurPrincipalCascada(servicio principal)
+//      · durExtra     ← durationMin − durPrincipal (si ≤ 0 → modo mono)
+//      · un slot [m, m+dur) es válido si ALGÚN candidato del principal
+//        está libre en [m, m+durPrincipal) Y el segundo profesional está
+//        libre en [m+durPrincipal, m+dur), cada uno dentro de SU horario.
+//      · el filtro `idStaff` del servicio principal se aplica SOLO al
+//        tramo A: el segundo no ejecuta el principal, ejecuta complementos.
+//      · si el segundo no trabaja ese día → huecos:[] motivo:'cerrado'.
+//
+//    ─── (E) crearReservaPublica: reparto SIN tocar el motor compartido ───
+//    Acepta `staffExtraId`. Si no llega / 'any' / igual al principal →
+//    comportamiento idéntico. Si llega concreto: se valida contra
+//    StaffConfig (activo y no recurso interno), el 'any' del PRINCIPAL se
+//    resuelve con `durPrincipal` (su tramo real, no el total), y la guardia
+//    defensiva de horario valida el tramo A contra el principal y el tramo
+//    B contra el segundo.
+//
+//    El reparto de fases se aplica DESPUÉS de crear el pack, aquí mismo,
+//    con patrón READ-MERGE-UPDATE sobre KamisuiteReservations. NO se toca
+//    `crearPackReserva` (recepcionProLogic): ese motor lo comparten
+//    Recepción PRO Desktop y Lite Mobile, y esta capacidad es exclusiva del
+//    cliente que reserva online. El motor de packs queda intacto en
+//    producción, sin despliegue ni riesgo asociado.
+//
+//    El bloque de reparto es NO-BLOCKING: si fallara, la reserva ya está
+//    creada y queda íntegra con el profesional principal.
+//
+//    ─── POR QUÉ NO HACE FALTA CAMPO NUEVO EN CMS ───
+//    `KamisuiteReservations.fases[].staffId` YA existe como override por
+//    fase (lo escribe el drag&drop de Recepción PRO V2) y este mismo
+//    archivo YA lo respeta al calcular ocupación: `f.staffId || r.staffId`
+//    en las dos expansiones de reservas (motor de huecos y
+//    resolverStaffLibre). Una reserva con fases repartidas entre dos
+//    estilistas ya se interpreta correctamente aguas abajo.
+//
+// v0.8.0: 🕐 FIX GRAVE — reservas online que desbordaban el horario de
+//    cierre del staff. Tres cambios coordinados. Solo afecta al widget
+//    público (motor de disponibilidad online); Recepción PRO desktop
+//    y móvil no se tocan (allí el operador decide manualmente).
+//
+//    ─── DIAGNÓSTICO DEL BUG ───
+//    Caso Pilar Carbonell (Hair-Times, 8-jul-2026): reserva WEB
+//    Tinte Raiz + Corte Mujer (Complemento) creada 19:00–20:20 con
+//    Raquel cuyo horario es 10:00–20:00. La reserva desbordó el
+//    cierre por 20 min. El motor de huecos NO validaba mal el
+//    horario del staff (línea 1179 v0.7.9 hacía `m+dur > horario.to`
+//    correcto); el fallo estaba en que `dur` que recibía era
+//    INCOMPLETA:
+//
+//    · `adaptarServicio` v0.7.9 emitía `baseDuration = it.duration`
+//      seco. Para un servicio complejo (cascada con PROCESO + fases
+//      INCLUIDAS), ese campo solo mide la fase de aplicación, NO la
+//      cascada completa. El bundle público (kr-data.js `_calc()`) suma
+//      encima solo los complementos ELEGIBLES del cliente. Resultado:
+//      la duración pasada a `getHuecosDisponibles` y a
+//      `resolverStaffLibre` era `aplicación + complementos elegibles`,
+//      sin PROCESO ni fases INCLUIDAS (Lavado / Secado).
+//
+//    · Al crear la reserva, `crearPackReserva` (`construirFasesPack`
+//      en recepcionProLogic.web) SÍ avanza el cursor por TODO el
+//      mapeoFases → `duracionTotal` real incluye TODO. Diferencia
+//      típica Tinte Raiz + Corte: widget pasaba ~40–50 min, reserva
+//      final era 80 min. El slot 19:00 pasaba el filtro con 40 min
+//      (19:40 ≤ 20:00) pero la reserva llegaba a 20:20.
+//
+//    ─── (A) baseDuration = CASCADA BASE REAL ───
+//    Nueva función interna `calcularBaseDurationCascada(it, porSetupUid)`
+//    que recorre `mapeoFases` y devuelve la duración de la cascada
+//    base (sin complementos elegibles del cliente), replicando
+//    LITERALMENTE la lógica de `construirFasesPack` para las piezas
+//    fijas obligatorias:
+//      · Si no hay mapeoFases → devuelve `it.duration` (comportamiento
+//        v0.7.9 idéntico para servicios simples y variantes sin
+//        cascada).
+//      · Con mapeoFases: parte de 0, antepone aplicación implícita
+//        si no hay `tipo:'aplicacion'` explícita (paridad con
+//        construirFasesPack), y suma:
+//          — `tipo:'aplicacion'`   → `it.duration`
+//          — `tipo:'proceso'`      → `f.min || it.minProceso`
+//          — `tipo:'servicio'` con `obligatorio:true` y sin variantes
+//            (CASO A INCLUIDA fija: Lavado, Secado) → `svc.duration`
+//            + `svc.minProceso` si lo tiene (patrón materializarConProceso).
+//      · NO se suman:
+//          — CASO B obligatorio CON variantes (Planchado M/L/XL en
+//            Botox): el widget lo emite como complemento required
+//            tipo choice y ya lo suma en `_calc()`.
+//          — CASO C opcional: el cliente elige, `_calc()` lo suma.
+//          — Chip rojo `tipo:'exclusivo'`: opcional, ídem.
+//    `adaptarServicio` reemplaza `baseDuration: toNum(it.duration)`
+//    por `baseDuration: calcularBaseDurationCascada(it, porSetupUid)`.
+//    Cero cambios en el resto del shape del widget: sigue siendo
+//    `{ setupUid, family, name, ..., baseDuration, ... }`. El bundle
+//    v2.0.16 usa `cfg.baseDuration` en `_calc()` sin saberlo — ahora
+//    recibe la cifra correcta y automáticamente propaga la duración
+//    total a `getHuecosDisponibles` y a `crearReservaPublica`. NO se
+//    toca el bundle.
+//
+//    ─── (B) MARGEN DE EXTENSIÓN — `closingGraceMin` ───
+//    Nuevo campo en `SalonConfig` (backend salonConfigLogic v1.0.6,
+//    widget widget_salon_config v1.0.12): Número de minutos que el
+//    salón autoriza que una reserva ONLINE termine DESPUÉS del `to`
+//    del horario del staff. Vacío / null / no numérico → 0
+//    (comportamiento estricto, corte exacto).
+//    Nuevo helper interno `leerClosingGraceMin()` que consulta la
+//    1ª fila de SalonConfig una sola vez por webMethod invocado.
+//    Se aplica en TRES puntos del widget público (nunca en Recepción
+//    PRO):
+//      1. `getHuecosDisponibles`: loop y filtro usan
+//         `horario.to + graceMin` como tope superior efectivo del
+//         staff (líneas antes 1176 y 1179 v0.7.9).
+//      2. `resolverStaffLibre`: filtro de candidatos con horario
+//         que cubre el rango usa `finMin <= horario.to + graceMin`.
+//         El resolvedor recibe `graceMin` como parámetro nuevo
+//         (default 0 → retrocompatible: si algún caller no lo pasa,
+//         corte estricto).
+//      3. `crearReservaPublica`: guardia defensiva final tras
+//         obtener `staffIdFinal` (sea staff concreto o resuelto
+//         de 'any'), leyendo el horario del staff en el `dow` de la
+//         fecha y verificando `horaHHmm + durationMin ≤ horario.to
+//         + graceMin`. Si desborda → rechaza con error legible SIN
+//         crear reserva. Protege contra payloads manipulados
+//         (URL/DevTools) que no hayan pasado por `getHuecosDisponibles`.
+//
+//    ─── COMPATIBILIDAD ───
+//    · Bundle v2.0.16: sin cambios.
+//    · Page code /reservar v0.3.3: sin cambios.
+//    · Recepción PRO desktop / móvil / Lite: sin cambios (no llaman
+//      a estos webMethods públicos, y `crearPackReserva` que sí
+//      comparten NO se toca).
+//    · SalonConfig sin `closingGraceMin` poblado (salones que aún no
+//      hayan actualizado tras v1.0.6): el helper devuelve 0 →
+//      comportamiento estricto, corte exacto al `to` del staff.
+//      Ningún salón queda peor que en v0.7.9.
+//
+// v0.7.9: 🛡️ MÁXIMA SEGURIDAD — resolución de 'Cualquiera' con DURACIÓN
+//    TOTAL de la cita (bloque continuo completo). Cierra el hueco que
+//    dejaba v0.7.8.
+//
+//    v0.7.8 resolvió el bug grave (CUALQUIERA sin empleado → invisible en
+//    Recepción Pro), PERO comprobaba la disponibilidad del profesional
+//    usando solo la duración BASE del principal. En cascadas con
+//    complementos (p.ej. cita 12:00–15:20), eso podía asignar a alguien
+//    libre al inicio pero ocupado a mitad → riesgo de solape.
+//
+//    LEY DEL PROYECTO (consigna registrada): el widget público va con
+//    máxima seguridad — bloque continuo con la duración total, sin liberar
+//    el tiempo de PROCESO al público en el arranque de V2. El tiempo de
+//    PROCESO queda para Recepción PRO (70-75% del volumen, por teléfono),
+//    donde el estilista ve la agenda. getHuecosDisponibles ya aplica ese
+//    criterio; ahora la resolución de 'any' usa EXACTAMENTE el mismo
+//    bloque continuo total que el motor de huecos validó para ofrecer la
+//    hora.
+//
+//    FIX: crearReservaPublica recibe durationMin (duración total) del
+//    payload — enviada por el bundle v2.0.16 y propagada por el page code
+//    v0.3.3 — y se la pasa a resolverStaffLibre. Fallback a la duración
+//    base del principal si el payload no la trae (page code antiguo).
+//
+//    Cero cambios en getHuecosDisponibles, resolverStaffLibre (su lógica
+//    de solape ya comprueba el rango que reciba), crearPackReserva, el
+//    resto de la centralita, categorías, servicios o variantes. Cero
+//    cambios estéticos.
+//
+// v0.7.8: 🩹 FIX CRÍTICO — CUALQUIERA ('any') se resuelve a un HUMANO
+//    REAL LIBRE antes de crear la reserva. Cierra el bug documentado en
+//    Conceptos Fundacionales §4B.
+//
+//    SÍNTOMA: una reserva del widget público con profesional "Cualquiera"
+//    se insertaba en KamisuiteReservations con staffId='' (crearReservaPublica
+//    convertía 'any'→'' y crearPackReserva insertaba sin empleado). La cita
+//    quedaba sin columna en Recepción Pro → no se pintaba, aunque SÍ existía
+//    en el CMS. Las reservas con profesional concreto (Ricardo, etc.) sí se
+//    pintaban. Reproducido 5-jul-2026.
+//
+//    CAUSA: este wrapper NUNCA resolvía 'any'. La regla §4B exige que todo
+//    backend que cree una reserva resuelva 'any' a un humano real ANTES de
+//    crear, o RECHACE si no hay ninguno libre. Nunca crear con staff vacío.
+//
+//    FIX (dos cambios, nada más):
+//    (a) NUEVA función interna resolverStaffLibre({fecha, horaHHmm,
+//        durationMin, idStaffPermitidos}). Replica LITERALMENTE la lógica
+//        interna ya probada de getHuecosDisponibles (carga de candidatos,
+//        leerHorarioStaffEnDia, cruce con KamisuiteReservations, detección
+//        de solape), pero comprueba UNA hora, acumula TODOS los libres y
+//        elige uno al azar (reparto de carga, mismo criterio que
+//        coloracionLogic v3.2.2). Devuelve {staffId, staffName} o null.
+//    (b) En crearReservaPublica, cuando staffId==='any': se llama a
+//        resolverStaffLibre ANTES de delegar en crearPackReserva. Si
+//        resuelve → se pasa el staffId/staffName real. Si null → se
+//        RECHAZA la reserva con error explicativo (no se crea).
+//    (c) La centralita de comunicaciones usa ahora staffNameFinal (nombre
+//        ya resuelto) en lugar de la variable original staffName.
+//
+//    DURACIÓN usada para el rango del resolvedor: la duración BASE del
+//    principal (ServiceCatalog.duration), dato cierto disponible en este
+//    punto. La duración TOTAL con complementos vive en crearPackReserva
+//    (motor de cascada) y NO se recalcula aquí para no duplicar ese motor.
+//
+//    Cero cambios en: getHuecosDisponibles, categorías, servicios,
+//    variantes, resto de la centralita, getConstants. Cero cambios en
+//    crearPackReserva ni en el bundle. Cero cambios estéticos.
+//
+// v0.7.7: 🎚️ VARIANTE del servicio PRINCIPAL propagada a crearPackReserva.
+//    Pareja del widget bundle v2.0.15 (nuevo selector de variante del
+//    principal) y del Lite Mobile v0.5.0 (mismo patrón).
+//
+//    Bug de siempre: crearReservaPublica NO destructuraba varianteSel
+//    del payload aunque el backend crearPackReserva v1.0.25 (motor
+//    Recepción PRO, 19 Jun) YA lo soportaba plenamente. Consecuencia:
+//    las reservas públicas de servicios simple_variantes (Corte Mujer
+//    M/L/XL, Corte Niño S/M/L, etc.) se creaban SIEMPRE a precio y
+//    duración base del catálogo, ignorando la elección de variante.
+//    El widget público v2.0.14 tampoco tenía selector de variante del
+//    principal (nunca renderizado), así que el gap era doble: ni el
+//    cliente podía elegir la variante en la UI, ni el motor sabría
+//    interpretarla si le llegara.
+//
+//    v2.0.15 del bundle repara la UI; esta v0.7.7 del motor cierra el
+//    lazo del contrato al aceptar y propagar varianteSel:
+//      · Nuevo campo destructurado del payload: varianteSel (default null).
+//      · Se pasa tal cual a crearPackReserva. Si es null (variante BASE
+//        M o servicio sin variantes) el motor usa precio/duración base
+//        del catálogo — comportamiento pre-v0.7.7 idéntico.
+//      · Si trae {idx, label, price, duration}, crearPackReserva v1.0.25
+//        sustituye precio/duración y refleja el label en el detalle.
+//    Cambio 100% aditivo, retrocompatible: cualquier cliente que llame
+//    a crearReservaPublica sin el campo sigue funcionando exactamente
+//    como antes. Paridad estricta con Recepción PRO Desktop v1.1.43 y
+//    Lite Mobile v0.5.0.
+//    Cero cambios en adaptarServicio, en getCatalogoPublico, en el shape
+//    emitido al widget, ni en ningún otro webMethod.
+//
+// v0.7.6: 🩹 FIX duplicación de complementos que están en grupo exclusivo.
+//    Editor pareja: edicionservicios v1.14.2 (auto-marca en `complementos`
+//    los servicios metidos en un chip rojo del mapeoFases, para que
+//    Recepción PRO los vea en su popover de armar).
+//
+//    Consecuencia no deseada de ese auto-marcado: en el widget público
+//    esos setupUids salían dos veces al cliente — una como toggle
+//    bool/choice suelto (recorriendo `it.complementos`) y otra como
+//    opción dentro del panel expandible del grupo exclusivo (recorriendo
+//    mapeoFases). El fix es local a `adaptarServicio`:
+//
+//      · Antes de mapear `complementos` a bool/choice, se calcula un
+//        Set con todos los setupUids que están en `refs` de algún item
+//        tipo:'exclusivo' del mapeoFases.
+//      · Se filtran esos uids del array de complementos → el bloque
+//        bool/choice ya no los emite.
+//      · Siguen apareciendo como opciones del type:'exclusive' — es la
+//        única vía por la que el cliente los ve/elige en el widget.
+//
+//    Cero cambios en la lógica de precios, obligatoriedad, staff filter,
+//    ni en el motor. El motor (recepcionProLogic v1.0.34) ya estaba
+//    protegido por refsConsumidos, así que el fix es puramente cosmético
+//    aunque necesario para no confundir al cliente en la UI.
+//
+// v0.7.5: 🎯 CHIP ROJO — grupo exclusivo de complementos.
+//    adaptarServicio() recorre ahora el mapeoFases y detecta items de
+//    tipo:'exclusivo' (nuevo). Cada uno se emite al widget como un
+//    complemento adicional con:
+//      · id       = 'exc:' + índice del item en el mapeo (identificador
+//                   único dentro del servicio; el widget solo lo usa
+//                   como key de estado, nunca lo envía al backend).
+//      · label    = f.label (texto libre configurado por el salón).
+//      · type     = 'exclusive'.
+//      · required = false (por decisión del método: elige uno o ninguno).
+//      · options  = [{ id:'none', label:'No añadir', price:0, duration:0 },
+//                    ...refs resueltos a {id:setupUid, label:svc.label,
+//                                          price:svc.price, duration:svc.duration}]
+//    Cuando el cliente elige una opción (≠ 'none'), el widget bundle
+//    envía el uid del servicio elegido en el array complementosSetupUid
+//    con la forma {uid, varianteId, varianteLabel, price, duration} —
+//    igual patrón que type:'choice' con variante. El motor
+//    (recepcionProLogic v1.0.34) detecta el uid dentro de los `refs`
+//    del item exclusivo y materializa el servicio en esa posición.
+//
+//    Si el servicio elegido tiene minProceso > 0, el motor lo desdobla
+//    aplicación + proceso automáticamente (mismo mecanismo v1.0.34
+//    aplicable a Caso A/B/C y a la nueva rama exclusivo).
+//
+//    Retrocompatible al 100%: los servicios cuyo mapeoFases no lleve
+//    aún ningún item tipo:'exclusivo' (todos los servicios existentes
+//    hoy en producción) siguen emitiendo el mismo shape que en v0.7.4.
+//
+// v0.7.4:
+//   🔧 OBLIGATORIEDAD por FASE explícita (separación de conceptos).
+//      La regla deducida de v0.7.3 ("complemento es required si su setupUid
+//      aparece como fase tipo:'servicio' en mapeoFases del servicio
+//      principal") rompía Tinte/Mechas/Coloración: esos servicios tienen
+//      Corte/Peinado/Tratamiento en su mapeoFases ÚNICAMENTE para fijar
+//      la POSICIÓN en la cascada cuando el cliente los añade, NO para
+//      obligarlos. La regla v0.7.3 confundía dos conceptos (posición vs
+//      obligatoriedad).
+//
+//      CORRECCIÓN: cada fase tipo:'servicio' del mapeoFases admite ahora
+//      un flag `obligatorio` (Boolean, default false). El flag lo añade
+//      el editor de servicios (edicionservicios v1.13.0) con un toggle
+//      visual por chip de fase. El backend solo lee el flag.
+//
+//      adaptarServicio:
+//      ANTES (v0.7.3):
+//        cMandatory = setupUidsEnFases.has(c.setupUid)
+//                                            ^ true para cualquier fase en
+//                                              el mapeo (presencia = obliga)
+//      AHORA (v0.7.4):
+//        cMandatory = busca la fase tipo:'servicio' del mapeoFases del
+//                     principal cuyo ref === c.setupUid; lee
+//                     !!fase.obligatorio. Si no hay fase coincidente o no
+//                     tiene el flag → false.
+//
+//      Aplicable tanto a complementos con variantes (type:'choice') como
+//      sin variantes (type:'bool'). El resto del adapter (variantes,
+//      opciones, "No añadir", precio/duración, idStaff, promoPct…) queda
+//      intacto.
+//
+//      Default false significa que TODAS las fases existentes en el CMS
+//      (que aún no llevan el flag) pasan a OPCIONALES. Botox + Planchado
+//      deja de ser obligatorio hasta que se entre al editor de ese
+//      servicio y se marque la fase Planchado como obligatoria. Decisión
+//      de Jal — Tinte/Mechas/Coloración son varios; Botox es un caso.
+//      Menos clicks de migración con default false.
+//
+//      Cambio simétrico al de recepcionProLogic v1.0.27. El widget bundle
+//      (kamisuite-widget-bundle.js) NO se toca: ya consume `required`
+//      resuelto desde aquí.
+//
+// v0.7.3:
+//   🧩 OBLIGATORIEDAD DEDUCIDA del mapeoFases (sin campo `mandatory`).
+//      Un complemento con variantes es OBLIGATORIO (required, sin opción
+//      "No añadir") SI Y SOLO SI su setupUid aparece como fase tipo:'servicio'
+//      en el mapeoFases del servicio principal. Si el salón coloca el
+//      servicio (Planchado) como fase de la cascada, esa fase siempre ocurre
+//      → elegir su variante es obligatorio. Si no está en el mapeo → opcional.
+//      No requiere campo nuevo en CMS ni toggle en el editor.
+//
+// v0.7.2:
+//   🧩 COMPLEMENTOS CON VARIANTES + OBLIGATORIOS (adaptarServicio).
+//      Dos capacidades INDEPENDIENTES en cada complemento de un servicio:
+//      · hasVariants → el complemento se emite como type:'choice' con una
+//        opción por variante ({id:tamano_estilo, label:nombre, price:precio,
+//        duration:duracion}). ANTES se mapeaba siempre como 'bool' tomando
+//        solo el precio base → las variantes (Planchado M/L/XL) se anulaban.
+//        FIX del bug. Si no es obligatorio, se antepone opción 'none'
+//        ("No añadir", 0€) para poder no añadirlo.
+//      · mandatory (campo Boolean nuevo en ServiceCatalog) → required:true.
+//        El widget lo mete en el gating del botón RESERVAR (no se reserva
+//        sin elegir). En choice obligatorio NO se incluye la opción 'none'.
+//      El widget (kamisuite-widget-bundle v2.0.13) ya pinta y suma choice;
+//      _submit ahora envía la variante elegida. crearReservaPublica usa el
+//      precio/duración de la variante.
+//
+// v0.7.1:
+//   📜 getSalonConfig() expone privacyPolicyUrl y termsConditionsUrl.
+//
+// v0.7.0:
+//   🌈 NUEVO — Descuento promocional por servicio expuesto al widget público.
+//      · adaptarServicio() ahora LEE `descuentoActivo` (Boolean) y
+//        `descuentoPromo` (Number 0-100, admite null) de ServiceCatalog y
+//        los proyecta como `promoPct` (Number 0-100) en el shape del
+//        servicio que consume kamisuite-widget-bundle.
+//      · Regla dura idéntica a la de Recepción Pro V2 / recepcionProLogic
+//        v1.0.19: el descuento SOLO se aplica si `descuentoActivo === true`
+//        (estricto). Si descuentoActivo=false con descuentoPromo=15 → 0.
+//        Si descuentoPromo no es número o es ≤0 → 0. Clampado a [0..100].
+//      · Antes (v0.6.0) `promoPct: 0` estaba HARDCODEADO → el bundle nunca
+//        recibía promo aunque el CMS la tuviera activa.
+//      · Cambio puramente aditivo + quirúrgico: ninguna otra función ni
+//        otro campo del shape se ven afectados. Servicios sin promo siguen
+//        recibiendo promoPct:0 (idéntico al comportamiento anterior).
+//      · El widget bundle v2.0.10 consume este campo + lo combina con el
+//        nuevo bloque "ENHORABUENA, este servicio tiene un descuento
+//        promocional" en el resumen de la reserva. El widget público NO
+//        cobra; el cobro real (con el descuento aplicado al neto) ocurre
+//        en Recepción Pro V2 al ejecutar la cita en salón.
+//
+// v0.6.0:
+//   🔐 NUEVO — Filtro de staff por servicio (ServiceCatalog.idStaff).
+//      · adaptarServicio() añade `idStaff:[]` al shape del servicio,
+//        leyendo `it.idStaff.ids` (Object Wix CMS, NO array suelto).
+//        Lectura defensiva contra los 3 formatos posibles (Object,
+//        Array legacy, String JSON viejo).
+//      · getHuecosDisponibles acepta `idStaffPermitidos` opcional.
+//        Si llega con IDs, restringe los candidatos de staff antes
+//        del cruce con horarios y reservas. Si vacío/ausente → todos.
+//      · crearReservaPublica valida en backend que el staffId elegido
+//        está permitido por el servicio. Devuelve error si no, antes
+//        de delegar en crearPackReserva. Defensa contra manipulación
+//        del payload (no se confía solo en el filtro del widget).
+//      · idStaff vacío [] = fallback liberal (todos los activos).
+//
+// v0.5.0:
+//   📨 NUEVO — Integración con CENTRALITA DE COMUNICACIONES.
+//      Tras crearReservaPublica exitosa, se invoca notificarConfirmacion()
+//      de backend/comunicacionesLogic.web.js para disparar email + WhatsApp
+//      según SalonConfig. Mismo patrón aplicado en V1 (simplesLogic v1.5.0,
+//      coloracionLogic v3.2.7, tratamientosLogic v1.0.9). Llamada envuelta
+//      en try/catch no-blocking: si la centralita falla, la reserva ya
+//      está creada — el cliente simplemente no recibe la notificación.
+//
+//      Datos resueltos en el wrapper antes de invocar centralita:
+//      · serviciosStr ← ServiceCatalog.label por principalSetupUid
+//      · estilistaStr ← StaffConfig.displayName por fases[0].staffId
+//        (necesario cuando proId='any' → crearPackReserva asigna staff
+//         real pero no devuelve nombre directamente).
+//      · fechaBonita ← DD/MM/YYYY (formato esperado por driver WhatsApp).
+//      · horaFinal ← horaHHmm + duracionTotal devuelto por crearPackReserva.
+//      · importeStr ← `${precioTotal}€`.
+//      · origen ← 'Reserva Online' (V1) — distingue email del de Recepción.
+//      · estadoPago ← 'Pago en salón' (las web no pagan online aún).
+//
+// v0.4.0:
+//   ⚡ getHuecosDisponibles REAL (fase 2). Reemplaza el mock determinista.
+//     · Lee StaffConfig.workingHoursSessionIds (JSON Text con items[]).
+//     · Si todos los staff candidatos tienen open:false ese día →
+//       huecos:[] + motivo:'cerrado' + abreA:null.
+//     · Genera slots cada 15 min entre from/to del staff.
+//     · Cruza con KamisuiteReservations del día (excluye CANCELADA,
+//       respeta override staffId por fase desde drag&drop V2).
+//     · Fases con ocupa:false (PROCESO) liberan al stylist correctamente.
+//     · proId 'any' → al menos un staff libre = hueco disponible.
+//     · Primer hueco visible = min(from) entre staff candidatos.
+//     · Devuelve abreA y cierraA para que el widget sepa el rango real.
+//   ✅ Lunes y domingo (open:false en KALONICE) ya NO generan huecos.
+//
+// v0.3.0:
+//   + crearReservaPublica ahora envía `origenRecepcion: false` al
+//     crearPackReserva (requiere recepcionProLogic >= v1.0.17).
+//     Permite distinguir en agenda las citas creadas desde la web
+//     pública vs las creadas por operadores en Recepción Pro.
+//
+// v0.2.0:
+//   + NEW crearReservaPublica — wrapper público que delega en
+//     crearPackReserva de recepcionProLogic. Aísla el iframe del
+//     backend interno y normaliza el contrato. Acepta tanto
+//     memberContactId (cliente logueado) como contactDetails (cliente
+//     anónimo). Internamente esResponsabilidad del wrapper validar
+//     campos mínimos antes de delegar.
+//
+// v0.1.0:
+//   + getCategoriasPublicas, getServiciosCategoria, getProfesionalesPublicos,
+//     getSalonConfig, getHuecosDisponibles (mock).
+//
+// PROPÓSITO:
+//   Servir datos al widget público <kami-reserva> que vivirá en la web
+//   pública del salón (página dinámica /reservar/<slug>). El cliente
+//   anónimo puede ver categorías, elegir servicio, día, profesional y
+//   hora. Crear la reserva real se hará en fase 3 vía crearPackReserva.
+//
+// MULTI-TENANT:
+//   - Las CATEGORÍAS viven en HairSalonServices (cuenta Wix de cada salón).
+//   - Los SERVICIOS viven en ServiceCatalog (misma cuenta).
+//   - El mapeo categoría → servicios se hace por el campo `groupCatalog`
+//     de HairSalonServices que apunta a `group` de ServiceCatalog.
+//   - `groupCatalog` admite varios valores separados por coma (N:1).
+//     Ejemplo: "Corte Mujer" → "cortesmujer,Niñas".
+//
+// COLECCIONES:
+//   - HairSalonServices    (lectura: categorías públicas de la web)
+//   - ServiceCatalog       (lectura: servicios reservables)
+//   - StaffConfig          (lectura: profesionales)
+//   - SalonConfig          (lectura: nombre del salón + widgetSkin)
+//
+// PERMISOS:
+//   Todas las funciones son Anyone (cliente anónimo). Internamente cada
+//   query usa suppressAuth: true.
+//
+// FASES:
+//   Fase 1 (este archivo): catálogo + categorías + profesionales +
+//     huecos MOCK determinista + lectura widgetSkin desde SalonConfig.
+//   Fase 2: huecos reales cruzando KamisuiteReservations.
+//   Fase 3: crearReservaPublica → llama a crearPackReserva existente.
+//
+// FUNCIONES EXPORTADAS:
+//   - getCategoriasPublicas()         → categorías activas con foto + descripción
+//   - getServiciosCategoria({slug})   → servicios principales de la categoría
+//   - getProfesionalesPublicos()      → staff del salón + "Cualquiera"
+//   - getSalonConfig()                → widgetSkin + nombre del salón
+//   - getHuecosDisponibles({fecha,    → mock determinista (fase 1)
+//       proId, durationMin})
+// =====================================================
+
+import { Permissions, webMethod } from 'wix-web-module';
+import wixData from 'wix-data';
+
+const VERSION = '0.11.5';
+const TAG = `[WidgetPublico][${VERSION}]`;
+
+// v0.10.0 — Prefijo de ordenación del nombre del personal.
+// 'C_Angela' → 'Angela'. La letra y el guion bajo solo sirven para
+// ordenar la lista; no forman parte del nombre y no deben grabarse en
+// la reserva ni mostrarse al cliente. Misma expresión que usan
+// recepcionProLogic y catalogoConsultaLogic al leer StaffConfig.
+function nombreStaffLimpio(v) {
+  return String(v || '').trim().replace(/^[A-Z]_/, '').trim();
+}
+
+const CMS_CATALOGO   = 'ServiceCatalog';
+const CMS_CATEGORIAS = 'HairSalonServices';
+const CMS_STAFF      = 'StaffConfig';
+const CMS_CONFIG     = 'SalonConfig';
+
+// v0.9.7 — Antelación mínima por defecto para reservas ONLINE, en minutos.
+// Se usa cuando SalonConfig.bookingBufferMinutes viene vacío, no numérico,
+// negativo, o la lectura de SalonConfig falla. Un salón que quiera permitir
+// reservar "para ya mismo" debe escribir un 0 explícito en el campo.
+const BUFFER_DEFAULT_MIN = 15;
+
+const USOS_PUBLICOS     = ['publico', 'ambos'];
+// v0.11.0 — Ámbito INTERNO (Recepción PRO / AKIRA). Mismo criterio que
+// USOS_VALIDOS de recepcionProLogic: lo que puede reservar el salón, que
+// no coincide con lo que se ofrece al público. Solo lo usa
+// getComposicionServicio; ninguna función anterior lo mira.
+const USOS_INTERNOS     = ['kamisuite', 'ambos'];
+const TIPOS_PRINCIPALES = ['principal', 'ambos'];
+const NOTA_RECURSO_INTERNO = 'RECURSO INTERNO';
+
+// =====================================================
+// HELPERS
+// =====================================================
+
+function toNum(v) {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function safeErr(e) {
+  return { message: e?.message || String(e) };
+}
+
+// jsonIn defensivo (idéntico patrón a recepcionProLogic v1.0.16).
+// Wix Text/Object puede tener: string JSON legacy, array directo, o
+// objeto envuelto con claves canónicas {items|ids|names}.
+function jsonIn(v, unwrapKey) {
+  if (v == null || v === '') return [];
+  if (typeof v === 'string') {
+    try { v = JSON.parse(v); } catch (e) { return []; }
+  }
+  if (v && typeof v === 'object' && !Array.isArray(v)) {
+    if (unwrapKey && Array.isArray(v[unwrapKey])) return v[unwrapKey];
+    if (Array.isArray(v.items)) return v.items;
+    if (Array.isArray(v.ids))   return v.ids;
+    if (Array.isArray(v.names)) return v.names;
+    return [];
+  }
+  if (Array.isArray(v)) return v;
+  return [];
+}
+
+// Slug a partir de link-servicios-title: "/servicios/tratamientos-faciales"
+// → "tratamientos-faciales". Tolerante a slash final, vacío y errores.
+function extraerSlug(linkPath) {
+  if (!linkPath) return '';
+  return String(linkPath).split('/').filter(Boolean).pop() || '';
+}
+
+// v0.9.5 — El CMS puede guardar el enlace con la tilde CODIFICADA en URL
+// ("depilaci%C3%B3n-laser") mientras el navegador entrega el slug ya
+// descodificado ("depilación-laser"). Se descodifica siempre antes de
+// comparar. Si la cadena no es un porcentaje válido, decodeURIComponent
+// lanza: se devuelve tal cual.
+function decodeSeguro(s) {
+  const str = String(s || '');
+  if (!str.includes('%')) return str;
+  try {
+    return decodeURIComponent(str);
+  } catch (e) {
+    return str;
+  }
+}
+
+// v0.9.2 — Normalización de slug para comparar.
+// La misma letra acentuada puede llegar en dos codificaciones distintas que
+// se imprimen igual: NFC (un carácter) o NFD (letra + tilde combinante). Sin
+// normalizar, "depilación-laser" !== "depilación-laser".
+function slugNFC(s) {
+  return decodeSeguro(s).trim().normalize('NFC');
+}
+
+// v0.9.2 — Clave de comparación para nombres de grupo/categoría: sin
+// espacios sobrantes ni dobles, sin tildes y en minúsculas. Los guiones
+// bajos y los guiones cuentan como espacio, porque en el CMS conviven las
+// dos costumbres para los nombres compuestos ("SPA CAPILAR" con espacio,
+// "TRATAMIENTO_FACIALES" con guion bajo) y un servicio y su categoría
+// pueden haberse tecleado con distinto criterio. "DEPILACION LASER ",
+// "Depilación Laser" y "DEPILACION_LASER" dan la misma clave.
+function claveGrupo(s) {
+  return String(s || '')
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_\-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase();
+}
+
+// Misma cadena en minúsculas y sin diacríticos: última red de seguridad.
+// normalize('NFD') separa la tilde de la letra y el rango \u0300-\u036f la
+// elimina.
+function slugPlano(s) {
+  return decodeSeguro(s)
+    .trim()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
+}
+
+// Iniciales a partir de un nombre: "Verónica" → "VE", "María José" → "MJ".
+function generarIniciales(nombre) {
+  const palabras = String(nombre || '').trim().split(/\s+/).filter(Boolean);
+  if (palabras.length === 0) return '··';
+  if (palabras.length === 1) return palabras[0].slice(0, 2).toUpperCase();
+  return (palabras[0][0] + palabras[1][0]).toUpperCase();
+}
+
+// v0.8.0 — Lee `closingGraceMin` de la 1ª fila de SalonConfig.
+// Margen (en minutos) que autoriza que una reserva ONLINE termine
+// después del `to` del horario del staff. Vacío / null / no numérico
+// / error → 0 (comportamiento estricto, corte exacto). Nunca lanza:
+// si algo va mal se registra warning y se cae a 0.
+// NO se cachea entre invocaciones (el salón puede cambiarlo entre
+// reservas). Sí se lee UNA sola vez por webMethod invocado.
+// v0.9.7 — Sustituye a `leerClosingGraceMin()` (v0.8.0). MISMA query
+// única a SalonConfig; ahora devuelve los DOS parámetros que gobiernan el
+// motor de reservas online, para no pagar una segunda lectura del CMS:
+//
+//   graceMin  = closingGraceMin      → vacío/null/error → 0
+//   bufferMin = bookingBufferMinutes → vacío/null/error → BUFFER_DEFAULT_MIN
+//
+// La asimetría del fallback es deliberada: el margen de cierre por defecto
+// es 0 (nadie sale peor que antes de v0.8.0), mientras que la antelación
+// mínima por defecto es 15 min (nadie puede reservar en el pasado aunque
+// el salón no haya configurado nada todavía).
+async function leerConfigMotor() {
+  try {
+    const rCfg = await wixData.query(CMS_CONFIG)
+      .limit(1)
+      .find({ suppressAuth: true });
+    const cfg = rCfg.items?.[0];
+    if (!cfg) return { graceMin: 0, bufferMin: BUFFER_DEFAULT_MIN };
+
+    const rawGrace = Number(cfg.closingGraceMin);
+    const graceMin = (Number.isFinite(rawGrace) && rawGrace >= 0) ? rawGrace : 0;
+
+    const rawBuffer = Number(cfg.bookingBufferMinutes);
+    const bufferMin = (Number.isFinite(rawBuffer) && rawBuffer >= 0)
+      ? rawBuffer
+      : BUFFER_DEFAULT_MIN;
+
+    return { graceMin, bufferMin };
+  } catch (e) {
+    console.warn(`${TAG} ⚠️ leerConfigMotor falló (${e.message}) → grace 0 / buffer ${BUFFER_DEFAULT_MIN}`);
+    return { graceMin: 0, bufferMin: BUFFER_DEFAULT_MIN };
+  }
+}
+
+// v0.9.7 — Reloj del salón (Europe/Madrid), con los MISMOS patrones de
+// conversión que ya usa el resto del archivo para cruzar reservas:
+// 'en-CA' da YYYY-MM-DD y 'es-ES' con hour12:false da HH:mm.
+// Devuelve { ymd: 'YYYY-MM-DD', min: minutos desde medianoche }.
+function ahoraMadrid() {
+  const now = new Date();
+  const ymd = now.toLocaleDateString('en-CA', { timeZone: 'Europe/Madrid' });
+  const hhmm = now.toLocaleTimeString('es-ES', {
+    timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit', hour12: false
+  });
+  const min = parseHHMM(hhmm);
+  if (min == null) {
+    // No debería ocurrir: es el mismo patrón de conversión que el motor
+    // ya usa para cruzar las reservas del día. Se deja rastro en logs
+    // porque, si ocurriera, la antelación mínima quedaría sin efecto.
+    console.warn(`${TAG} ⚠️ ahoraMadrid: hora no parseable ("${hhmm}") → 0`);
+  }
+  return { ymd, min: (min == null ? 0 : min) };
+}
+
+// v0.9.7 — Minuto mínimo admisible para una reserva ONLINE en `fecha`.
+// Devuelve:
+//   null  → la fecha ya pasó por completo (no cabe ninguna hora).
+//   0     → la fecha es futura (sin restricción por hora).
+//   N > 0 → la fecha es HOY: solo se admiten inicios a partir del minuto N
+//           (ahora + antelación mínima).
+function minimoInicioAdmisible(fecha, bufferMin) {
+  const { ymd, min } = ahoraMadrid();
+  if (String(fecha) < ymd) return null;
+  if (String(fecha) > ymd) return 0;
+  return min + (Number(bufferMin) || 0);
+}
+
+// v0.8.0 — Devuelve la duración (min) de la CASCADA BASE del servicio,
+// recorriendo su mapeoFases y sumando las piezas fijas obligatorias.
+// Réplica literal del criterio de `construirFasesPack` (recepcionProLogic
+// v1.0.37) para las piezas SIN elección del cliente. Los complementos
+// elegibles del cliente los suma el widget bundle en `_calc()`.
+//
+//   · Sin mapeoFases (servicio simple / variantes sin cascada) →
+//     devuelve `it.duration` (comportamiento v0.7.9 idéntico).
+//   · Con mapeoFases → parte de 0 y recorre; si no hay `tipo:'aplicacion'`
+//     explícita, antepone una implícita (paridad literal con
+//     construirFasesPack líneas 1371–1374 recepcionProLogic).
+//     Suma por tipo:
+//       — `tipo:'aplicacion'` → `it.duration`
+//       — `tipo:'proceso'`    → `f.min` si viene válido, sino `it.minProceso`
+//       — `tipo:'servicio'` con `obligatorio:true` y sin variantes
+//         (CASO A INCLUIDA fija, típicamente Lavado o Secado):
+//           `svc.duration` + `svc.minProceso` (si lo tiene, patrón
+//            del helper `materializarConProceso`).
+//     No se suman:
+//       — CASO B obligatorio CON variantes (Planchado M/L/XL): el widget
+//         lo trata como choice required y ya lo suma en `_calc()`.
+//       — CASO C opcional: el cliente elige, `_calc()` lo suma.
+//       — Chip rojo `tipo:'exclusivo'`: opcional, ídem.
+//       — Otros tipos desconocidos: se ignoran (defensivo, no invento).
+//   · Ref huérfano (svc no encontrado en porSetupUid) → se salta ese
+//     item sin fallar (mismo patrón defensivo de `construirFasesPack`
+//     líneas 1447–1449).
+function calcularBaseDurationCascada(it, porSetupUid) {
+  const dPrincipal = toNum(it.duration);
+  const mapeo = jsonIn(it.mapeoFases, 'items');
+  if (!Array.isArray(mapeo) || mapeo.length === 0) {
+    return dPrincipal;
+  }
+  const dProcesoPrincipal = toNum(it.minProceso);
+  const tieneAplicacionExplicita = mapeo.some(f => f && f.tipo === 'aplicacion');
+  const recorrido = tieneAplicacionExplicita
+    ? mapeo
+    : [{ tipo: 'aplicacion' }, ...mapeo];
+  let total = 0;
+  for (const f of recorrido) {
+    if (!f) continue;
+    if (f.tipo === 'aplicacion') {
+      total += dPrincipal;
+      continue;
+    }
+    if (f.tipo === 'proceso') {
+      const fm = toNum(f.min);
+      total += (fm > 0) ? fm : dProcesoPrincipal;
+      continue;
+    }
+    if (f.tipo === 'servicio' && typeof f.ref === 'string' && f.ref && f.obligatorio === true) {
+      const svc = porSetupUid && porSetupUid[f.ref];
+      // v0.9.9 — Antes se saltaba en SILENCIO. Un ref que no resuelve son
+      // minutos que desaparecen del cálculo sin dejar rastro: es exactamente
+      // como se perdió el Lavado hasta v0.9.8. Ahora queda dicho en el log
+      // con el nombre del servicio, para que se vea el mismo día.
+      if (!svc) {
+        console.warn(`${TAG} ⚠️ FASE OBLIGATORIA SIN RESOLVER en "${it.label || it.setupUid}": ref ${f.ref} no está en el catálogo activo. Sus minutos NO se cuentan y la cita puede desbordar el cierre.`);
+        continue;
+      }
+      const svcHasVariants = (svc.hasVariants === true || String(svc.hasVariants) === 'true');
+      if (svcHasVariants) continue; // CASO B — el widget lo suma como choice
+      // CASO A: obligatoria sin variantes → aplicación + proceso propio si lo tiene.
+      total += toNum(svc.duration);
+      const svcMp = toNum(svc.minProceso);
+      if (svcMp > 0) total += svcMp;
+      continue;
+    }
+    // tipo:'servicio' NO obligatorio (CASO C) → opcional, el widget lo suma
+    // tipo:'exclusivo' → chip rojo, opcional
+    // otros tipos → ignorar (defensivo)
+  }
+  return total;
+}
+
+// v0.9.0 — Devuelve la duración (min) del TRAMO DEL PROFESIONAL PRINCIPAL,
+// es decir, desde el inicio de la cita hasta el PUNTO DE CORTE a partir del
+// cual las fases pasan al segundo profesional (el de los complementos).
+//
+// Mismo recorrido y mismo criterio literal que `calcularBaseDurationCascada`
+// (y que `construirFasesPack` en recepcionProLogic), pero deteniéndose en el
+// corte. Regla acordada con Jal el 3-ago-2026, traducción estructural de la
+// línea 1854 de coloracionLogic V1 (`fase.fase === 'LAVADO' ? principal : extras`):
+//
+//   · CON PROCESO en el mapeo → el tramo del principal incluye todo hasta
+//     el final de la PRIMERA pieza que ocupa después del proceso (el
+//     "lavado" de V1). Se corta ahí.
+//     Si justo después del proceso lo primero que aparece es una pieza
+//     ELEGIBLE por el cliente (CASO C opcional, exclusivo, o CASO B con
+//     variantes), NO se suma: el corte queda al terminar el proceso.
+//     Criterio defensivo — el tramo del principal nunca contiene piezas
+//     que dependan de la elección del cliente, y por eso esta duración es
+//     exacta sin conocer las variantes elegidas.
+//
+//   · SIN PROCESO → el tramo del principal termina justo ANTES de la
+//     primera pieza elegible del mapeo. Si el mapeo no tiene ninguna pieza
+//     elegible, el tramo del principal es toda la cascada base (los
+//     complementos elegidos se encolan detrás y van al segundo).
+//
+//   · Sin mapeoFases (servicio simple / variantes sin cascada) →
+//     `it.duration`: el principal ejecuta el servicio y los complementos
+//     encolados detrás van al segundo.
+//
+// Devuelve SIEMPRE un número ≥ 0. El llamante calcula
+// `durExtra = durationTotal − durPrincipal` y, si sale ≤ 0, cae a modo
+// mono-profesional (comportamiento v0.8.0 idéntico).
+function calcularDurPrincipalCascada(it, porSetupUid) {
+  const dPrincipal = toNum(it.duration);
+  const mapeo = jsonIn(it.mapeoFases, 'items');
+  if (!Array.isArray(mapeo) || mapeo.length === 0) {
+    return dPrincipal;
+  }
+  const dProcesoPrincipal = toNum(it.minProceso);
+  const tieneAplicacionExplicita = mapeo.some(f => f && f.tipo === 'aplicacion');
+  const recorrido = tieneAplicacionExplicita
+    ? mapeo
+    : [{ tipo: 'aplicacion' }, ...mapeo];
+
+  let total = 0;
+  let procesoVisto = false;
+
+  for (const f of recorrido) {
+    if (!f) continue;
+
+    if (f.tipo === 'aplicacion') {
+      total += dPrincipal;
+      continue;
+    }
+
+    if (f.tipo === 'proceso') {
+      const fm = toNum(f.min);
+      total += (fm > 0) ? fm : dProcesoPrincipal;
+      procesoVisto = true;
+      continue;
+    }
+
+    // Chip rojo (grupo exclusivo) = siempre elegible por el cliente → CORTE.
+    if (f.tipo === 'exclusivo') {
+      return total;
+    }
+
+    if (f.tipo === 'servicio' && typeof f.ref === 'string' && f.ref) {
+      const svc = porSetupUid && porSetupUid[f.ref];
+      // v0.9.9 — Mismo aviso que en calcularBaseDurationCascada: aquí el
+      // ref sin resolver falsea el PUNTO DE CORTE entre los dos
+      // profesionales, no solo la duración total.
+      if (!svc) {
+        console.warn(`${TAG} ⚠️ FASE SIN RESOLVER (corte de tramo) en "${it.label || it.setupUid}": ref ${f.ref} no está en el catálogo activo.`);
+        continue;
+      }
+
+      const esObligatoria = (f.obligatorio === true);
+      const svcHasVariants = (svc.hasVariants === true || String(svc.hasVariants) === 'true');
+
+      // Elegible por el cliente: CASO C (opcional) o CASO B (obligatoria
+      // con variantes, el cliente elige cuál). En ambos casos → CORTE.
+      if (!esObligatoria || svcHasVariants) {
+        return total;
+      }
+
+      // CASO A: obligatoria sin variantes (Lavado, Secado). Pieza base.
+      total += toNum(svc.duration);
+      const svcMp = toNum(svc.minProceso);
+      if (svcMp > 0) total += svcMp;
+
+      // Con proceso ya visto, ESTA es la primera pieza que ocupa después
+      // del proceso — el "lavado" de V1. Se queda con el principal y se
+      // corta aquí.
+      if (procesoVisto) return total;
+      continue;
+    }
+
+    // Otros tipos desconocidos → ignorar (defensivo, no invento).
+  }
+
+  // Recorrido completo sin corte: toda la cascada base es del principal.
+  return total;
+}
+
+// =====================================================
+// ADAPTER · ServiceCatalog row → contrato del widget <kami-reserva>
+// =====================================================
+// Mapea un registro de ServiceCatalog al shape que espera kr-data.js:
+//   { family, name, basePrice, baseDuration, promoPct, requiresExtraPro,
+//     complements: [{ id, label, hint, type, price, duration }, ...] }
+// Campos extra propios de KAMISUITE que se conservan para que el widget
+// los use al pintar la cabecera y para variantes:
+//   setupUid, description, image, hasVariants, variantes, claseServicio.
+//
+// REGLAS:
+//   - Precio 0 o no informado → basePrice = null ("a valorar").
+//   - Complementos: cada setupUid de ServiceCatalog.complementos se resuelve
+//     al registro completo y se mapea como complement tipo "bool".
+//     Si quisieras complementos tipo "choice" (ej. "Acabado": Secado/Corto/
+//     Medio/Largo), el catálogo aún no los modela. Lo planteamos cuando
+//     aparezca el primer caso real.
+//   - Variantes: se pasan al widget en bruto. El widget actual no las
+//     maneja todavía; se conectarán en la segunda iteración del widget.
+//   - requiresExtraPro: false por ahora (no lo modela el catálogo).
+//     El widget puede ocultar el bloque sin problema (deuda v1.0).
+
+function adaptarServicio(it, porSetupUid, porSetupUidFases) {
+  // v0.7.4 — OBLIGATORIEDAD por FASE explícita. Cada fase tipo:'servicio'
+  // del mapeoFases admite el flag `obligatorio` (Boolean, default false).
+  // Si esa fase coincide en `ref` con el setupUid de un complemento, su
+  // flag dicta si el complemento es required. Si no hay fase coincidente
+  // o no tiene el flag → opcional.
+  //
+  // Esto separa POSICIÓN (mapeoFases dicta dónde encaja el complemento
+  // en la cascada si se elige) de OBLIGATORIEDAD (lo dicta el flag de la
+  // fase). La regla v0.7.3 mezclaba ambas cosas y rompía Tinte/Mechas/
+  // Coloración. El flag lo añade el editor (edicionservicios v1.13.0).
+  const mapeo = jsonIn(it.mapeoFases, 'items');
+  const fasePorRef = {};
+  if (Array.isArray(mapeo)) {
+    for (const f of mapeo) {
+      if (f && f.tipo === 'servicio' && typeof f.ref === 'string' && f.ref) {
+        fasePorRef[f.ref] = f;
+      }
+    }
+  }
+
+  const complementosUidsRaw = jsonIn(it.complementos, 'items');
+
+  // v0.7.6 — Set de setupUids que YA salen como opción dentro de algún
+  // item tipo:'exclusivo' del mapeoFases. Deben excluirse del bloque
+  // bool/choice para no duplicar: el editor v1.14.2 auto-marca esos
+  // servicios en `it.complementos` (para que Recepción PRO los vea en
+  // el popover del servicio), pero en el widget público solo deben
+  // aparecer como opciones del panel del grupo exclusivo.
+  const uidsEnExclusivos = new Set();
+  if (Array.isArray(mapeo)) {
+    for (const f of mapeo) {
+      if (!f || f.tipo !== 'exclusivo' || !Array.isArray(f.refs)) continue;
+      for (const r of f.refs) if (typeof r === 'string' && r) uidsEnExclusivos.add(r);
+    }
+  }
+
+  const complementosUids = (Array.isArray(complementosUidsRaw) ? complementosUidsRaw : [])
+    .filter(uid => !uidsEnExclusivos.has(uid));
+
+  const complements = complementosUids
+    .map(uid => porSetupUid[uid])
+    .filter(Boolean)
+    .map(c => {
+      // hasVariants → 'choice' (una opción por variante).
+      // required    → lee !!fase.obligatorio de la fase del mapeoFases.
+      const cTieneVariantes = !!c.hasVariants;
+      const faseEnMapeo = fasePorRef[c.setupUid];
+      const cMandatory = !!(faseEnMapeo && faseEnMapeo.obligatorio === true);
+
+      if (cTieneVariantes) {
+        // Variantes del complemento: {nombre, precio, duracion, tamano_estilo}
+        const vars = jsonIn(c.variantes, 'items');
+        const opts = (Array.isArray(vars) ? vars : [])
+          .map((v, i) => ({
+            id: (v && typeof v.tamano_estilo === 'string' && v.tamano_estilo.trim())
+                  ? v.tamano_estilo.trim()
+                  : ('v' + i),
+            label: (v && v.nombre) ? String(v.nombre) : ('Opción ' + (i + 1)),
+            price: toNum(v && v.precio),
+            duration: toNum(v && v.duracion)
+          }));
+
+        // Opcional → se antepone "No añadir". Obligatorio → sin "No añadir".
+        const options = cMandatory
+          ? opts
+          : [{ id: 'none', label: 'No añadir', price: 0, duration: 0 }, ...opts];
+
+        return {
+          id: c.setupUid,
+          label: c.label || '',
+          hint: c.descripcion || '',
+          type: 'choice',
+          required: cMandatory,
+          options
+        };
+      }
+
+      // Sin variantes → complemento booleano (sí/no), como hasta ahora.
+      return {
+        id: c.setupUid,
+        label: c.label || '',
+        hint: c.descripcion || '',
+        type: 'bool',
+        required: cMandatory,   // bool obligatorio = debe ser "Sí"
+        price: toNum(c.price),
+        duration: toNum(c.duration)
+      };
+    });
+
+  // v0.7.5 — CHIP ROJO. Recorrer mapeoFases buscando items tipo:'exclusivo'
+  // y añadirlos al array de complements como type:'exclusive'.
+  // Cada opción se resuelve al registro completo del servicio para leer
+  // label, price y duration del catálogo (cero hardcoding, valores vivos).
+  // Refs huérfanos (servicio borrado o inactivo del catálogo) se omiten
+  // silenciosamente.
+  if (Array.isArray(mapeo)) {
+    mapeo.forEach((f, idx) => {
+      if (!f || f.tipo !== 'exclusivo') return;
+      if (!Array.isArray(f.refs) || f.refs.length === 0) return;
+      const opts = f.refs
+        .map(r => porSetupUid[r])
+        .filter(Boolean)
+        .map(svc => ({
+          id: svc.setupUid,
+          label: svc.label || '',
+          price: toNum(svc.price),
+          duration: toNum(svc.duration)
+        }));
+      if (opts.length === 0) return;
+      complements.push({
+        id: 'exc:' + idx,
+        label: (typeof f.label === 'string' && f.label.trim()) ? f.label.trim() : 'Elige uno',
+        hint: '',
+        type: 'exclusive',
+        required: false,
+        options: [{ id: 'none', label: 'No añadir', price: 0, duration: 0 }, ...opts]
+      });
+    });
+  }
+
+  const hasVariants = !!it.hasVariants;
+  const variantes = hasVariants ? jsonIn(it.variantes, 'items') : [];
+
+  const priceNum = toNum(it.price);
+  const basePrice = priceNum > 0 ? priceNum : null;
+
+  // v0.6.0 — idStaff filtra qué profesionales pueden ejecutar este
+  // servicio. Es campo Object con shape {ids:[...]}, NO string ni
+  // array suelto (ver IDS_QUE_SIEMPRE_PEDIMOS.md). Lectura defensiva
+  // contra los 3 formatos por si una fila legacy aún no migró:
+  //   · Object con .ids → caso normal.
+  //   · Array directo   → legacy.
+  //   · String JSON     → legacy más viejo.
+  let idStaffArr = [];
+  const rawIdStaff = it.idStaff;
+  if (rawIdStaff) {
+    if (Array.isArray(rawIdStaff.ids)) idStaffArr = rawIdStaff.ids;
+    else if (Array.isArray(rawIdStaff)) idStaffArr = rawIdStaff;
+    else if (typeof rawIdStaff === 'string') {
+      try {
+        const p = JSON.parse(rawIdStaff);
+        if (Array.isArray(p?.ids)) idStaffArr = p.ids;
+        else if (Array.isArray(p)) idStaffArr = p;
+      } catch (_) {}
+    }
+  }
+  idStaffArr = idStaffArr.filter(s => typeof s === 'string' && s.length > 0);
+
+  return {
+    setupUid: it.setupUid || '',
+    family: it.group || '',
+    name: it.label || '',
+    description: it.descripcion || '',
+    image: it.image || null,
+    basePrice,
+    // v0.8.0 — Duración TOTAL de la cascada base (aplicación + PROCESO +
+    // fases INCLUIDAS obligatorias sin variantes). Los complementos
+    // elegibles del cliente se suman encima en el widget bundle `_calc()`.
+    // Cierra el bug de reservas online que desbordaban el cierre del staff
+    // (caso Pilar Carbonell 8-jul-2026: Tinte Raiz + Corte Mujer complemento
+    // se reservaba con dur del widget = aplicación + corte, pero la reserva
+    // real incluía además PROCESO + Lavado + Secado → desbordaba el `to`).
+    // Sin mapeoFases: comportamiento idéntico a v0.7.9 (it.duration seco).
+    // v0.9.8 — La cascada se resuelve contra `porSetupUidFases` (catálogo
+    // activo COMPLETO), no contra `porSetupUid` (solo uso público). Las
+    // fases incluidas (Lavado, Secado, Lavado y neutralizado) llevan
+    // uso='kamisuite' por diseño —no se venden sueltas— y por eso NO
+    // estaban en el índice de oferta: `porSetupUid[f.ref]` daba undefined
+    // y sus minutos se perdían en silencio. `porSetupUid` se sigue usando
+    // para `complements` (lo que se OFRECE en pantalla), que no cambia.
+    baseDuration: calcularBaseDurationCascada(it, porSetupUidFases || porSetupUid),
+    // v0.7.0 — descuento promocional desde ServiceCatalog. Regla dura
+    // idéntica a Recepción Pro V2 (recepcionProLogic v1.0.19):
+    //   · Solo si descuentoActivo === true (estricto, NO != false).
+    //   · descuentoPromo debe ser número finito > 0; null/undefined/string → 0.
+    //   · Clampado a [0..100].
+    promoPct: (it.descuentoActivo === true
+               && typeof it.descuentoPromo === 'number'
+               && Number.isFinite(it.descuentoPromo)
+               && it.descuentoPromo > 0)
+      ? Math.min(100, Math.max(0, it.descuentoPromo))
+      : 0,
+    hasVariants,
+    variantes,
+    // v0.9.0 — Deja de estar clavado en `false`. El bloque "Profesional
+    // para los complementos" del bundle solo tiene sentido si hay algo que
+    // repartir: sin complementos elegibles, no hay segundo profesional.
+    // El bundle v2.0.17 añade encima la condición de que el cliente haya
+    // MARCADO al menos uno.
+    requiresExtraPro: Array.isArray(complements) && complements.length > 0,
+    complements,
+    claseServicio: it.claseServicio || '',
+    idStaff: idStaffArr,   // v0.6.0 — wixResourceIds permitidos. [] = todos.
+    // v0.9.6 — ¿Este servicio se vende también en bono? Dato PÚBLICO y
+    // GENÉRICO: no dice nada de quién reserva ni de si tiene bono. Sirve solo
+    // para que el widget muestre, justo antes de reservar, un recordatorio de
+    // repasar las condiciones del bono a quien lo tenga. Deliberadamente NO se
+    // consulta KamisuiteVouchers: eso exigiría identificar al visitante y este
+    // aviso es informativo, no personalizado.
+    tieneBono: it.bonoActivo === true,
+    order: toNum(it.order)
+  };
+}
+
+// =====================================================
+// 1 · GET CATEGORÍAS PÚBLICAS
+// =====================================================
+// Devuelve las categorías activas de HairSalonServices ordenadas por orden.
+// Útil tanto para construir el repeater de la página de inicio de reservas
+// (si Jal lo quiere CMS-first más adelante) como para resolver una categoría
+// por slug.
+//
+// Forma devuelta:
+//   { ok, categorias: [{ _id, title, subtitle, description, image,
+//     orden, slug, groupCatalog, linkServiciosTitle }] }
+export const getCategoriasPublicas = webMethod(
+  Permissions.Anyone,
+  async () => {
+    const t0 = Date.now();
+    try {
+      const r = await wixData.query(CMS_CATEGORIAS)
+        .eq('activo', true)
+        .ascending('orden')
+        .limit(100)
+        .find({ suppressAuth: true });
+
+      const cats = (r.items || []).map(it => ({
+        _id: it._id,
+        title: it.title || '',
+        subtitle: it.subtitle || '',
+        description: it.description || '',
+        image: it.image || null,
+        orden: toNum(it.orden),
+        slug: extraerSlug(it['link-servicios-title']),
+        groupCatalog: it.groupCatalog || '',
+        linkServiciosTitle: it['link-servicios-title'] || ''
+      }));
+
+      console.log(`${TAG} ✅ getCategoriasPublicas: ${cats.length} categorías. ${((Date.now()-t0)/1000).toFixed(2)}s`);
+      return { ok: true, version: VERSION, categorias: cats };
+
+    } catch (e) {
+      console.error(`${TAG} ❌ getCategoriasPublicas:`, e.message);
+      return { ok: false, version: VERSION, error: safeErr(e), categorias: [] };
+    }
+  }
+);
+
+// =====================================================
+// 2 · GET SERVICIOS DE UNA CATEGORÍA
+// =====================================================
+// Resuelve los servicios principales de una categoría dada por su slug
+// (preferido) o directamente por groupCatalog. Internamente:
+//   1) Si llega slug, lo busca en HairSalonServices y lee su groupCatalog.
+//   2) Hace split(',') por si la categoría agrupa varios `group` del
+//      ServiceCatalog (ej. Corte Mujer = "cortesmujer,Niñas").
+//   3) Carga TODOS los servicios públicos activos (incluye los que solo
+//      son complementos) para construir el índice porSetupUid y resolver
+//      complementos del adapter.
+//   4) Filtra los servicios PRINCIPALES de los groups solicitados y los
+//      adapta al contrato del widget.
+//
+// Forma devuelta:
+//   { ok, servicios: [adaptedService, ...], groupsAplicados: ['coloracion', ...],
+//     categoria: { title, subtitle, description, image } }
+export const getServiciosCategoria = webMethod(
+  Permissions.Anyone,
+  async ({ slug, groupCatalog } = {}) => {
+    const t0 = Date.now();
+    try {
+      // 1. Resolver groupCatalog desde slug si hace falta
+      let gc = groupCatalog;
+      let categoria = null;
+
+      if (slug) {
+        const r = await wixData.query(CMS_CATEGORIAS)
+          .eq('activo', true)
+          .limit(100)
+          .find({ suppressAuth: true });
+
+        const cats = r.items || [];
+
+        // v0.9.2 — Tres pasadas, de más estricta a más tolerante.
+        const objNFC   = slugNFC(slug);
+        const objPlano = slugPlano(slug);
+
+        let match =
+          cats.find(it => slugNFC(extraerSlug(it['link-servicios-title'])) === objNFC) ||
+          cats.find(it => slugNFC(extraerSlug(it['link-servicios-title'])).toLowerCase() === objNFC.toLowerCase()) ||
+          cats.find(it => slugPlano(extraerSlug(it['link-servicios-title'])) === objPlano);
+
+        if (!match) {
+          // Sin match: dejar en el log los slugs disponibles para poder
+          // diagnosticarlo de un vistazo en vez de a ciegas.
+          const disponibles = cats.map(it => extraerSlug(it['link-servicios-title'])).filter(Boolean);
+          console.warn(`${TAG} ⚠️ slug "${slug}" no casa con ninguna categoría activa. Disponibles: [${disponibles.join(' | ')}]`);
+        }
+
+        if (match) {
+          gc = match.groupCatalog || '';
+          categoria = {
+            _id: match._id,
+            title: match.title || '',
+            subtitle: match.subtitle || '',
+            description: match.description || '',
+            image: match.image || null,
+            slug,
+            linkServiciosTitle: match['link-servicios-title'] || ''
+          };
+        }
+      }
+
+      if (!gc) {
+        console.warn(`${TAG} ⚠️ getServiciosCategoria: groupCatalog no resuelto (slug=${slug})`);
+        return { ok: false, version: VERSION, error: { message: 'Categoría no encontrada' }, servicios: [], categoria: null };
+      }
+
+      // 2. Split por coma (N:1 — Depilacion, Corte Mujer, Hombre…)
+      const groups = String(gc).split(',').map(s => s.trim()).filter(Boolean);
+
+      // v0.9.2 — El group del servicio y el groupCatalog de la categoría los
+      // teclean personas en dos pantallas distintas. Un espacio de más, una
+      // tilde o una mayúscula bastaban para dejar la categoría vacía sin
+      // ninguna pista. Se comparan por clave normalizada.
+      const clavesGrupo = new Set(groups.map(claveGrupo));
+
+      // 3. Cargar el catálogo y filtrar EN CÓDIGO.
+      // v0.9.4 — Antes el filtro iba en la consulta: .eq('active', true) y
+      // .hasSome('uso', USOS_PUBLICOS). Eso es literal: una fila con `active`
+      // vacío (no false, vacío) o con `uso` escrito como "Ambos" o con un
+      // espacio detrás quedaba fuera de la consulta y el servicio desaparecía
+      // de la web sin dejar rastro, aunque en el editor se viera correcto.
+      const r2 = await wixData.query(CMS_CATALOGO)
+        .limit(1000)
+        .find({ suppressAuth: true });
+
+      const todos = r2.items || [];
+
+      // Activo salvo que esté explícitamente desactivado.
+      const esActivo = (it) => it.active !== false;
+      // Uso público comparado sin espacios ni mayúsculas.
+      const esPublico = (it) => USOS_PUBLICOS.includes(String(it.uso || '').trim().toLowerCase());
+
+      const all = todos.filter(it => esActivo(it) && esPublico(it));
+
+      // Dejar constancia de las filas que el criterio literal anterior habría
+      // tirado, para poder corregir el dato en el CMS con calma.
+      const rescatados = all.filter(it => it.active !== true || !USOS_PUBLICOS.includes(it.uso));
+      if (rescatados.length) {
+        console.warn(`${TAG} 🩹 ${rescatados.length} servicio(s) con el dato flojo (active/uso) admitidos igualmente: ${rescatados.map(it => `${it.label}(active=${JSON.stringify(it.active)}, uso=${JSON.stringify(it.uso)})`).join(' | ')}`);
+      }
+
+      // Índice de OFERTA: solo lo que puede mostrarse al cliente.
+      const porSetupUid = {};
+      for (const it of all) if (it.setupUid) porSetupUid[it.setupUid] = it;
+
+      // v0.9.8 — Índice de FASES: catálogo activo COMPLETO, sin filtro de
+      // uso. Sirve ÚNICAMENTE para resolver los `ref` del mapeoFases al
+      // calcular la duración en cascada. No alimenta ninguna lista visible.
+      const porSetupUidFases = {};
+      for (const it of todos) if (it.setupUid && esActivo(it)) porSetupUidFases[it.setupUid] = it;
+
+      // 4. Filtrar principales del/los group(s) y adaptar
+      const delGrupo = all.filter(it => clavesGrupo.has(claveGrupo(it.group)));
+
+      const servicios = delGrupo
+        .filter(it => TIPOS_PRINCIPALES.includes(String(it.tipo || '').trim().toLowerCase()))
+        .sort((a, b) => toNum(a.order) - toNum(b.order))
+        .map(it => adaptarServicio(it, porSetupUid, porSetupUidFases));
+
+      // v0.9.2 — Diagnóstico: si el grupo tiene servicios pero ninguno es
+      // principal, decirlo con nombre y rol. Es la causa más habitual de
+      // "categoría vacía" y antes no dejaba rastro en el log.
+      if (servicios.length === 0 && delGrupo.length > 0) {
+        const detalle = delGrupo.map(it => `${it.label}(rol=${it.tipo || '∅'})`).join(' | ');
+        console.warn(`${TAG} ⚠️ groups=[${groups.join(',')}] tiene ${delGrupo.length} servicio(s) pero ninguno con rol principal/ambos: ${detalle}`);
+      }
+      if (delGrupo.length === 0) {
+        // v0.9.4 — Si el grupo no aparece entre los admitidos, buscarlo en el
+        // catálogo COMPLETO y decir por qué quedó fuera. Cierra el diagnóstico
+        // en una sola línea en vez de a base de recargas.
+        const gruposVivos = [...new Set(all.map(it => String(it.group || '∅')))].sort();
+        console.warn(`${TAG} ⚠️ Ningún servicio del grupo [${groups.join(',')}] llega al filtro`);
+        console.warn(`${TAG} 🔎 Grupos admitidos (${all.length} de ${todos.length} servicios): [${gruposVivos.join(' | ')}]`);
+
+        const enCrudo = todos.filter(it => clavesGrupo.has(claveGrupo(it.group)));
+        if (enCrudo.length) {
+          const detalle = enCrudo.map(it =>
+            `${it.label}(active=${JSON.stringify(it.active)}, uso=${JSON.stringify(it.uso)}, rol=${JSON.stringify(it.tipo)})`
+          ).join(' | ');
+          console.warn(`${TAG} 🔎 En el catálogo SÍ hay ${enCrudo.length} con ese grupo, excluidos por sus campos: ${detalle}`);
+        } else {
+          const clavesReales = [...new Set(todos.map(it => claveGrupo(it.group)))].sort();
+          console.warn(`${TAG} 🔎 Ni en el catálogo completo hay group que case. Claves reales: [${clavesReales.join(' | ')}]`);
+        }
+      }
+
+      console.log(`${TAG} ✅ getServiciosCategoria slug=${slug || '∅'} groups=[${groups.join(',')}]: ${servicios.length} servicios. ${((Date.now()-t0)/1000).toFixed(2)}s`);
+      return { ok: true, version: VERSION, servicios, groupsAplicados: groups, categoria };
+
+    } catch (e) {
+      console.error(`${TAG} ❌ getServiciosCategoria:`, e.message);
+      return { ok: false, version: VERSION, error: safeErr(e), servicios: [], categoria: null };
+    }
+  }
+);
+
+// =====================================================
+// 3 · GET PROFESIONALES PÚBLICOS
+// =====================================================
+// Mismo patrón que getStaffColumnas de recepcionProLogic, pero con shape
+// para el widget público (id + name + initials + profileImage).
+// Excluye recursos internos (CUALQUIERA, PROCESO) marcados con la nota
+// "RECURSO INTERNO" o cuyo canonicalName sea CUALQUIERA/PROCESO.
+// Antepone un pseudo-pro "Cualquiera" con id 'any' que el widget usa
+// como wildcard de UI (igual que V1).
+export const getProfesionalesPublicos = webMethod(
+  Permissions.Anyone,
+  async () => {
+    const t0 = Date.now();
+    try {
+      const r = await wixData.query(CMS_STAFF)
+        .eq('active', true)
+        .limit(100)
+        .find({ suppressAuth: true });
+
+      const items = r.items || [];
+      const reales = items
+        .filter(it => {
+          if (String(it.notes || '').includes(NOTA_RECURSO_INTERNO)) return false;
+          const canon = String(it.canonicalName || '').toUpperCase();
+          if (canon === 'CUALQUIERA' || canon === 'PROCESO') return false;
+          return true;
+        })
+        .map(it => {
+          const name = (it.displayName || it.canonicalName || '').replace(/^[A-Z]_/, '');
+          return {
+            id: it.wixResourceId || it._id,
+            wixResourceId: it.wixResourceId || it._id,
+            wixScheduleId: it.wixScheduleId || '',
+            name,
+            initials: generarIniciales(name),
+            profileImage: it.profileImage || '',
+            any: false
+          };
+        })
+        .sort((a, b) => a.name.localeCompare(b.name));
+
+      const cualquiera = {
+        id: 'any', wixResourceId: 'any',
+        name: 'Cualquiera', initials: '··',
+        profileImage: '', any: true
+      };
+
+      console.log(`${TAG} ✅ getProfesionalesPublicos: ${reales.length} reales + 1 wildcard. ${((Date.now()-t0)/1000).toFixed(2)}s`);
+      return { ok: true, version: VERSION, profesionales: [cualquiera, ...reales] };
+
+    } catch (e) {
+      console.error(`${TAG} ❌ getProfesionalesPublicos:`, e.message);
+      return { ok: false, version: VERSION, error: safeErr(e), profesionales: [] };
+    }
+  }
+);
+
+// =====================================================
+// 4 · GET SALON CONFIG (solo lo que el widget necesita)
+// =====================================================
+// Lee la primera fila de SalonConfig (1 fila por salón en su cuenta Wix).
+// Devuelve únicamente lo que el widget público necesita:
+//   - widgetSkin: id del skin a aplicar (niebla, arena, lumiere, …,
+//                 oceano). Default 'niebla' si no está informado.
+//   - salonName: para texto de confirmación / agradecimiento.
+//
+// NOTA: el campo widgetSkin debe crearse en SalonConfig (Text). Mientras
+// no exista o esté vacío, devuelve 'niebla'.
+export const getSalonConfig = webMethod(
+  Permissions.Anyone,
+  async () => {
+    try {
+      const r = await wixData.query(CMS_CONFIG)
+        .limit(1)
+        .find({ suppressAuth: true });
+
+      const c = (r.items || [])[0] || {};
+      return {
+        ok: true,
+        version: VERSION,
+        config: {
+          salonName: c.salonName || c.name || '',
+          widgetSkin: c.widgetSkin || 'niebla',
+          privacyPolicyUrl: c.privacyPolicyUrl || '',
+          termsConditionsUrl: c.termsConditionsUrl || ''
+        }
+      };
+
+    } catch (e) {
+      console.error(`${TAG} ❌ getSalonConfig:`, e.message);
+      return { ok: false, version: VERSION, error: safeErr(e), config: { salonName: '', widgetSkin: 'niebla', privacyPolicyUrl: '', termsConditionsUrl: '' } };
+    }
+  }
+);
+
+// =====================================================
+// 5 · GET HUECOS DISPONIBLES (real, fase 2)
+// =====================================================
+// v0.4.0 — Implementación real. Sustituye al mock determinista.
+//
+// LECTURA DE HORARIOS:
+//   StaffConfig.workingHoursSessionIds — JSON Text con forma:
+//     {"items":[{"dow":0,"open":false},
+//               {"dow":2,"open":true,"from":"10:00","to":"19:00"}, ...]}
+//   dow = Date.getDay() (0=Domingo, 1=Lunes, ..., 6=Sábado)
+//
+// REGLAS:
+//   · Si TODOS los staff candidatos tienen `open:false` ese día →
+//     huecos: [], motivo: 'cerrado'.
+//   · Si proId === 'any' → unión de huecos de TODOS los staff activos
+//     (al menos un staff libre = hueco disponible).
+//   · Si proId concreto → solo ese staff.
+//   · El primer hueco visible = min(from) entre staff candidatos.
+//   · El último slot generado debe terminar antes de max(to).
+//   · Paso entre slots = 15 min (granularidad común salón).
+//   · Cruce con KamisuiteReservations del día (mismas reglas que
+//     Recepción Pro): un slot está ocupado si su rango [slot, slot+dur)
+//     se solapa con alguna reserva existente del staff.
+//   · status 'CANCELADA' se excluye del cruce.
+//
+// ENTRADA:
+//   { fecha: 'YYYY-MM-DD', proId: '<id>' | 'any', durationMin: number }
+// SALIDA:
+//   { ok, huecos: ['10:00', '10:15', ...], fecha, proId, durationMin,
+//     motivo: 'cerrado' | undefined, abreA: 'HH:mm' | null }
+//
+// `abreA` informa al widget de la hora de apertura para que sepa
+// dónde empezar a pintar el primer chip aunque haya huecos vacíos.
+
+const SLOT_STEP = 15;   // minutos entre slots
+
+function parseHHMM(s) {
+  const m = String(s || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = +m[1], mi = +m[2];
+  if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+  return h * 60 + mi;
+}
+
+function fmtHHMM(min) {
+  const h = Math.floor(min / 60), m = min % 60;
+  return String(h).padStart(2, '0') + ':' + String(m).padStart(2, '0');
+}
+
+// Lee horario {from,to} del staff para un dow concreto.
+// Devuelve null si está cerrado, no tiene horario configurado, o no parsea.
+function leerHorarioStaffEnDia(staffRow, dow) {
+  const raw = staffRow?.workingHoursSessionIds;
+  if (!raw) return null;
+  let items = [];
+  try {
+    if (typeof raw === 'string') {
+      const obj = JSON.parse(raw);
+      items = Array.isArray(obj?.items) ? obj.items : (Array.isArray(obj) ? obj : []);
+    } else if (raw && typeof raw === 'object') {
+      items = Array.isArray(raw.items) ? raw.items : (Array.isArray(raw) ? raw : []);
+    }
+  } catch (e) {
+    console.warn(`${TAG} ⚠️ workingHours JSON inválido (${staffRow?.canonicalName || staffRow?._id}):`, e.message);
+    return null;
+  }
+  const day = items.find(it => Number(it?.dow) === dow);
+  if (!day || !day.open) return null;
+  const from = parseHHMM(day.from);
+  const to = parseHHMM(day.to);
+  if (from == null || to == null || from >= to) return null;
+  return { from, to };
+}
+
+// =====================================================
+// v0.7.8 — RESOLVER "CUALQUIERA" ('any') A UN HUMANO REAL LIBRE
+// =====================================================
+// Cierra el bug crítico documentado en Conceptos Fundacionales §4B:
+// una reserva del widget público con profesional 'any' se insertaba en
+// KamisuiteReservations con staffId='' → Recepción Pro no la pintaba en
+// ninguna columna. crearReservaPublica NUNCA resolvía el 'any'.
+//
+// Esta función replica LITERALMENTE la lógica interna ya probada en
+// producción de getHuecosDisponibles (misma carga de candidatos, misma
+// lectura de horario con leerHorarioStaffEnDia, mismo cruce con
+// KamisuiteReservations y misma detección de solape), pero en lugar de
+// barrer todos los slots del día:
+//   · comprueba UNA sola hora (la solicitada),
+//   · NO hace break al primer libre: acumula TODOS los staff libres,
+//   · elige uno al azar (reparto de carga, mismo criterio que el
+//     patrón coloracionLogic v3.2.2 resolverCualquieraAHumanoLibre),
+//   · si NINGUNO está libre → devuelve null (el llamador rechaza la
+//     reserva, nunca la crea sin humano).
+//
+// Devuelve: { staffId, staffName } del elegido, o null si nadie libre.
+// idStaffPermitidos: array de wixResourceId permitidos para el servicio
+//   (ServiceCatalog.idStaff.ids). Vacío/no-array → fallback liberal
+//   (todos los activos), idéntico a getHuecosDisponibles.
+// v0.8.0 — Firma ampliada: `graceMin` (número, default 0) representa el
+// margen del salón que autoriza que la reserva termine hasta N minutos
+// después del `to` del horario del staff. Retrocompatible: si algún caller
+// no lo pasa, el valor por defecto 0 mantiene el corte estricto v0.7.9.
+async function resolverStaffLibre({ fecha, horaHHmm, durationMin, idStaffPermitidos, graceMin = 0 }) {
+  const dur = toNum(durationMin) || 60;
+  const grace = Number.isFinite(Number(graceMin)) && Number(graceMin) >= 0 ? Number(graceMin) : 0;
+  const inicioMin = parseHHMM(horaHHmm);
+  if (inicioMin == null) {
+    console.warn(`${TAG} resolverStaffLibre: horaHHmm inválida "${horaHHmm}"`);
+    return null;
+  }
+  if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(String(fecha))) {
+    console.warn(`${TAG} resolverStaffLibre: fecha inválida "${fecha}"`);
+    return null;
+  }
+  const finMin = inicioMin + dur;
+
+  // dow del día solicitado (interpretado como local Madrid) — igual que
+  // getHuecosDisponibles.
+  const [y, mo, d] = String(fecha).split('-').map(Number);
+  const dow = new Date(y, mo - 1, d).getDay(); // 0..6
+
+  // Filtro de staff permitidos para el servicio (mismo criterio).
+  const permitidosSet = (Array.isArray(idStaffPermitidos) && idStaffPermitidos.length)
+    ? new Set(idStaffPermitidos.map(String))
+    : null;
+
+  // 1) Cargar staff candidatos (idéntico a getHuecosDisponibles).
+  const rStaff = await wixData.query(CMS_STAFF)
+    .eq('active', true)
+    .limit(100)
+    .find({ suppressAuth: true });
+  let candidatos = (rStaff.items || []).filter(it => {
+    if (String(it.notes || '').includes(NOTA_RECURSO_INTERNO)) return false;
+    const canon = String(it.canonicalName || '').toUpperCase();
+    if (canon === 'CUALQUIERA' || canon === 'PROCESO') return false;
+    if (permitidosSet) {
+      const sid = it.wixResourceId || it._id;
+      if (!permitidosSet.has(String(sid))) return false;
+    }
+    return true;
+  });
+
+  // 2) Solo candidatos con horario abierto ese día que cubra el rango
+  //    [inicio, fin) de la cita.
+  // v0.8.0 — tope superior del staff extendido por `graceMin`
+  // (SalonConfig.closingGraceMin). Con grace=0 → comportamiento estricto
+  // v0.7.9 idéntico.
+  const disponibles = candidatos
+    .map(s => ({ staff: s, horario: leerHorarioStaffEnDia(s, dow) }))
+    .filter(h => h.horario)
+    .filter(h => inicioMin >= h.horario.from && finMin <= h.horario.to + grace);
+
+  if (!disponibles.length) {
+    console.log(`${TAG} resolverStaffLibre: 0 staff con horario para ${fecha} ${horaHHmm} dow=${dow}`);
+    return null;
+  }
+
+  // 3) Cargar reservas del día para cruce (idéntico a getHuecosDisponibles).
+  const startUTC = new Date(new Date(`${fecha}T00:00:00`).getTime() - 3 * 3600000);
+  const endUTC = new Date(new Date(`${fecha}T23:59:59`).getTime() + 3 * 3600000);
+  const rRes = await wixData.query('KamisuiteReservations')
+    .ge('fechaReserva', startUTC)
+    .le('fechaReserva', endUTC)
+    .ne('status', 'CANCELADA')
+    .limit(500)
+    .find({ suppressAuth: true });
+
+  // Expandir reservas en intervalos {staffId, startMin, endMin}
+  // (mismo tratamiento de fases con ocupa:false y reservas a medida).
+  const ocupados = [];
+  for (const r of (rRes.items || [])) {
+    const fasesArr = jsonIn(r.fases, 'items');
+    if (!Array.isArray(fasesArr) || !fasesArr.length) {
+      if (r.fechaReserva && r.duracionTotal) {
+        const start = new Date(r.fechaReserva);
+        const ymd = start.toLocaleDateString('en-CA', { timeZone: 'Europe/Madrid' });
+        if (ymd === fecha) {
+          const startMin = parseHHMM(start.toLocaleTimeString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit', hour12: false }));
+          if (startMin != null) {
+            ocupados.push({ staffId: r.staffId, startMin, endMin: startMin + (Number(r.duracionTotal) || 0) });
+          }
+        }
+      }
+      continue;
+    }
+    for (const f of fasesArr) {
+      if (f?.ocupa === false) continue;     // PROCESO libera al stylist
+      if (!f.start || !f.end) continue;
+      const ds = new Date(f.start);
+      const de = new Date(f.end);
+      const ymd = ds.toLocaleDateString('en-CA', { timeZone: 'Europe/Madrid' });
+      if (ymd !== fecha) continue;
+      const sm = parseHHMM(ds.toLocaleTimeString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit', hour12: false }));
+      const em = parseHHMM(de.toLocaleTimeString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit', hour12: false }));
+      if (sm == null || em == null) continue;
+      const sid = f.staffId || r.staffId || '';
+      ocupados.push({ staffId: sid, startMin: sm, endMin: em });
+    }
+  }
+
+  // 4) De los disponibles, quedarnos con los que NO tienen solape en el
+  //    rango solicitado (misma condición de solape que getHuecosDisponibles).
+  const libres = [];
+  for (const { staff } of disponibles) {
+    const sid = staff.wixResourceId || staff._id;
+    const haySolape = ocupados.some(o =>
+      o.staffId && o.staffId === sid &&
+      inicioMin < o.endMin && finMin > o.startMin
+    );
+    if (!haySolape) {
+      libres.push({
+        staffId: sid,
+        staffName: nombreStaffLimpio(staff.displayName || staff.canonicalName)
+      });
+    }
+  }
+
+  if (!libres.length) {
+    console.log(`${TAG} resolverStaffLibre: 0 staff LIBRE a ${fecha} ${horaHHmm} (${disponibles.length} con horario, todos ocupados)`);
+    return null;
+  }
+
+  // 5) Elegir uno al azar (reparto de carga, mismo criterio que
+  //    coloracionLogic v3.2.2).
+  const elegido = libres[Math.floor(Math.random() * libres.length)];
+  console.log(`${TAG} resolverStaffLibre: 'any' → ${elegido.staffName || elegido.staffId} (${libres.length} libre/s de ${disponibles.length})`);
+  return elegido;
+}
+
+export const getHuecosDisponibles = webMethod(
+  Permissions.Anyone,
+  async ({ fecha, proId, durationMin, idStaffPermitidos, proExtraId, principalSetupUid } = {}) => {
+    const t0 = Date.now();
+    try {
+      const dur = toNum(durationMin) || 60;
+      if (!fecha || !/^\d{4}-\d{2}-\d{2}$/.test(String(fecha))) {
+        return { ok: false, version: VERSION, error: { message: 'fecha inválida' }, huecos: [] };
+      }
+      // dow del día solicitado (interpretado como local Madrid)
+      const [y, mo, d] = fecha.split('-').map(Number);
+      const dow = new Date(y, mo - 1, d).getDay(); // 0..6
+
+      // v0.8.0 — margen del salón (SalonConfig.closingGraceMin). Aplicado
+      // como extensión del `to` del horario del staff en el filtro/loop
+      // de slots. Vacío / null / error → 0 (comportamiento estricto).
+      // v0.9.7 — una sola lectura de SalonConfig devuelve también la
+      // antelación mínima (bookingBufferMinutes).
+      const { graceMin, bufferMin } = await leerConfigMotor();
+
+      // v0.9.7 — ⛔ NADA EN EL PASADO.
+      // Día ya vencido → ni una consulta más al CMS: no hay huecos que
+      // ofrecer. Día de hoy → `minAdmisible` marca el primer minuto
+      // admisible (ahora + antelación mínima) y el bucle de slots lo
+      // aplica más abajo. Día futuro → 0, sin restricción por hora.
+      const minAdmisible = minimoInicioAdmisible(fecha, bufferMin);
+      if (minAdmisible === null) {
+        console.log(`${TAG} ⛔ ${fecha} ya pasó → 0 huecos.`);
+        return {
+          ok: true, version: VERSION,
+          fecha, proId, durationMin: dur,
+          huecos: [], abreA: null, cierraA: null
+        };
+      }
+
+      // v0.6.0 — filtro de staff permitidos para este servicio.
+      // idStaffPermitidos viene de ServiceCatalog.idStaff.ids del servicio
+      // que el cliente eligió. Si está vacío o no llega → fallback liberal
+      // (todos los activos pueden hacerlo). Si tiene IDs → restringe.
+      const permitidosSet = (Array.isArray(idStaffPermitidos) && idStaffPermitidos.length)
+        ? new Set(idStaffPermitidos.map(String))
+        : null;
+
+      // 1) Cargar staff candidatos
+      const rStaff = await wixData.query(CMS_STAFF)
+        .eq('active', true)
+        .limit(100)
+        .find({ suppressAuth: true });
+
+      // v0.9.0 — `activos` = humanos reales del salón, SIN el filtro
+      // idStaff del servicio principal. Se separa para poder resolver el
+      // segundo profesional (tramo de complementos), que NO ejecuta el
+      // servicio principal y por tanto no debe filtrarse por su idStaff.
+      // `candidatos` mantiene EXACTAMENTE el filtro de v0.6.0/v0.8.0.
+      const activos = (rStaff.items || []).filter(it => {
+        if (String(it.notes || '').includes(NOTA_RECURSO_INTERNO)) return false;
+        const canon = String(it.canonicalName || '').toUpperCase();
+        if (canon === 'CUALQUIERA' || canon === 'PROCESO') return false;
+        return true;
+      });
+
+      let candidatos = activos.filter(it => {
+        // v0.6.0 — solo staff permitidos para el servicio elegido.
+        if (permitidosSet) {
+          const sid = it.wixResourceId || it._id;
+          if (!permitidosSet.has(String(sid))) return false;
+        }
+        return true;
+      });
+
+      if (proId && proId !== 'any') {
+        candidatos = candidatos.filter(s =>
+          s.wixResourceId === proId || s._id === proId
+        );
+        if (!candidatos.length) {
+          // v0.6.0 — staff concreto no encontrado o no permitido para este servicio.
+          return { ok: false, version: VERSION, error: { message: 'Staff no disponible para este servicio' }, huecos: [] };
+        }
+      }
+
+      // 2) Determinar horario del día por staff
+      const horariosStaff = candidatos.map(s => ({
+        staff: s,
+        horario: leerHorarioStaffEnDia(s, dow)
+      }));
+      const disponibles = horariosStaff.filter(h => h.horario);
+
+      if (!disponibles.length) {
+        console.log(`${TAG} 🚫 ${fecha} dow=${dow}: salón cerrado (0 staff abierto)`);
+        return {
+          ok: true, version: VERSION, fecha, proId, durationMin: dur,
+          huecos: [], motivo: 'cerrado', abreA: null
+        };
+      }
+
+      // 3) Rango global [minFrom, maxTo] entre staff abiertos
+      const minFrom = Math.min(...disponibles.map(h => h.horario.from));
+      const maxTo = Math.max(...disponibles.map(h => h.horario.to));
+
+      // ─────────────────────────────────────────────────────────────
+      // 3-bis) v0.9.0 — MODO DOS TRAMOS (segundo profesional)
+      // ─────────────────────────────────────────────────────────────
+      // Si el cliente eligió un profesional distinto para los complementos,
+      // la cita se parte en dos tramos CONTIGUOS:
+      //     TRAMO A  [m, m+durPrincipal)  → profesional principal
+      //     TRAMO B  [m+durPrincipal, m+dur) → profesional de complementos
+      // El punto de corte lo calcula `calcularDurPrincipalCascada` sobre el
+      // mapeoFases del servicio principal (ver cabecera v0.9.0 (B)).
+      //
+      // `durPrincipal` se mide con EL MISMO mapa `porSetupUid` que usa
+      // `calcularBaseDurationCascada` para `baseDuration` (misma query:
+      // active + uso público). Es deliberado: así `durExtra = dur −
+      // durPrincipal` es coherente con la duración total que el bundle
+      // calculó a partir de ese mismo `baseDuration`, sea cual sea el
+      // contenido del catálogo.
+      //
+      // Cualquier condición que no se cumpla → se cae a MODO MONO, que es
+      // el comportamiento v0.8.0 byte a byte.
+      let durPrincipal = dur;
+      let durExtra = 0;
+      let staffExtraRow = null;
+      let horarioExtra = null;
+
+      const proExtraLimpio = (typeof proExtraId === 'string') ? proExtraId.trim() : '';
+      const quiereDual = !!proExtraLimpio
+        && proExtraLimpio !== 'any'
+        && proExtraLimpio !== proId;
+
+      if (quiereDual) {
+        if (!principalSetupUid) {
+          console.warn(`${TAG} ⚠️ proExtraId recibido sin principalSetupUid → no se puede calcular el corte. Modo mono.`);
+        } else {
+          try {
+            // v0.9.8 — Sin `.hasSome('uso', USOS_PUBLICOS)`. Este índice solo
+            // resuelve el principal y los `ref` de su mapeoFases para medir
+            // el corte del tramo; no alimenta nada visible. Con el filtro de
+            // uso, las fases incluidas (uso='kamisuite') quedaban fuera y
+            // durPrincipal salía corto.
+            const rCat = await wixData.query(CMS_CATALOGO)
+              .eq('active', true)
+              .limit(1000)
+              .find({ suppressAuth: true });
+            const allCat = rCat.items || [];
+            const porSetupUidCat = {};
+            for (const c of allCat) if (c.setupUid) porSetupUidCat[c.setupUid] = c;
+
+            const svcPrincipal = porSetupUidCat[principalSetupUid];
+            if (!svcPrincipal) {
+              console.warn(`${TAG} ⚠️ principalSetupUid ${principalSetupUid} no encontrado en catálogo → modo mono.`);
+            } else {
+              const dp = calcularDurPrincipalCascada(svcPrincipal, porSetupUidCat);
+              if (dp > 0 && dp < dur) {
+                durPrincipal = dp;
+                durExtra = dur - dp;
+              } else {
+                console.log(`${TAG} ℹ️ Corte no aplicable (durPrincipal=${dp}, durTotal=${dur}) → modo mono.`);
+              }
+            }
+          } catch (splitErr) {
+            console.warn(`${TAG} ⚠️ No se pudo calcular el corte de tramos: ${splitErr.message} → modo mono.`);
+          }
+        }
+      }
+
+      const dual = durExtra > 0;
+
+      if (dual) {
+        // El segundo profesional NO se filtra por el idStaff del servicio
+        // principal: no lo ejecuta. Se busca sobre `activos`.
+        staffExtraRow = activos.find(s =>
+          s.wixResourceId === proExtraLimpio || s._id === proExtraLimpio
+        ) || null;
+
+        if (!staffExtraRow) {
+          return {
+            ok: false, version: VERSION,
+            error: { message: 'El profesional elegido para los complementos no está disponible.' },
+            huecos: []
+          };
+        }
+
+        horarioExtra = leerHorarioStaffEnDia(staffExtraRow, dow);
+        if (!horarioExtra) {
+          console.log(`${TAG} 🚫 ${fecha} dow=${dow}: el profesional de complementos no trabaja ese día`);
+          return {
+            ok: true, version: VERSION, fecha, proId, durationMin: dur,
+            huecos: [], motivo: 'cerrado', abreA: null
+          };
+        }
+      }
+
+      // 4) Cargar reservas del día (todas) para cruce
+      const startUTC = new Date(new Date(`${fecha}T00:00:00`).getTime() - 3 * 3600000);
+      const endUTC = new Date(new Date(`${fecha}T23:59:59`).getTime() + 3 * 3600000);
+      const rRes = await wixData.query('KamisuiteReservations')
+        .ge('fechaReserva', startUTC)
+        .le('fechaReserva', endUTC)
+        .ne('status', 'CANCELADA')
+        .limit(500)
+        .find({ suppressAuth: true });
+
+      // Reservas por staffId (incluye fase movida con override)
+      // Para cada reserva, expandimos en intervalos {staffId, startMin, endMin}.
+      const ocupados = [];
+      for (const r of (rRes.items || [])) {
+        const fasesArr = jsonIn(r.fases, 'items');
+        if (!Array.isArray(fasesArr) || !fasesArr.length) {
+          // Reserva sin fases (a medida): bloquea su rango simple
+          if (r.fechaReserva && r.duracionTotal) {
+            const start = new Date(r.fechaReserva);
+            const ymd = start.toLocaleDateString('en-CA', { timeZone: 'Europe/Madrid' });
+            if (ymd === fecha) {
+              const startMin = parseHHMM(start.toLocaleTimeString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit', hour12: false }));
+              if (startMin != null) {
+                ocupados.push({ staffId: r.staffId, startMin, endMin: startMin + (Number(r.duracionTotal) || 0) });
+              }
+            }
+          }
+          continue;
+        }
+        for (const f of fasesArr) {
+          if (f?.ocupa === false) continue;     // PROCESO libera al stylist
+          if (!f.start || !f.end) continue;
+          const ds = new Date(f.start);
+          const de = new Date(f.end);
+          const ymd = ds.toLocaleDateString('en-CA', { timeZone: 'Europe/Madrid' });
+          if (ymd !== fecha) continue;
+          const sm = parseHHMM(ds.toLocaleTimeString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit', hour12: false }));
+          const em = parseHHMM(de.toLocaleTimeString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit', hour12: false }));
+          if (sm == null || em == null) continue;
+          const sid = f.staffId || r.staffId || '';
+          ocupados.push({ staffId: sid, startMin: sm, endMin: em });
+        }
+      }
+
+      // 5) Generar slots y filtrar
+      // Un slot [m, m+dur) está libre para proId 'any' si AL MENOS UN staff
+      // candidato lo tiene dentro de su horario y NO tiene ocupación cruzada.
+      // Para proId concreto, exige que ese staff esté libre.
+      // v0.8.0 — tope superior del staff extendido por graceMin
+      // (SalonConfig.closingGraceMin). Con grace=0 → estricto v0.7.9.
+      // v0.9.0 — En MODO DOS TRAMOS cada mitad se valida contra SU
+      // profesional: el principal debe estar libre en [m, m+durPrincipal)
+      // dentro de su horario, y el de complementos en
+      // [m+durPrincipal, m+dur) dentro del suyo. Mismo cruce de dos
+      // conjuntos por la hora exacta de corte que hacía
+      // `consultarDisponibilidadUnificada` en V1 (coloracionLogic, líneas
+      // 923-965). En MODO MONO (durExtra=0) el código es idéntico a v0.8.0.
+      const sidExtra = dual
+        ? (staffExtraRow.wixResourceId || staffExtraRow._id)
+        : null;
+
+      const huecos = [];
+      for (let m = minFrom; m + dur <= maxTo + graceMin; m += SLOT_STEP) {
+        // v0.9.7 — el bucle sigue arrancando en minFrom para NO desplazar
+        // la rejilla de horas (los slots siguen cayendo en :00 :15 :30 :45
+        // relativos a la apertura). Lo único que cambia es que, si el día
+        // pedido es hoy, se descartan los inicios anteriores a
+        // `ahora + antelación mínima`.
+        if (minAdmisible > 0 && m < minAdmisible) continue;
+
+        const mCorte = dual ? (m + durPrincipal) : (m + dur);
+
+        // ── TRAMO A · profesional principal ──
+        let alguienLibre = false;
+        for (const { staff, horario } of disponibles) {
+          if (m < horario.from || mCorte > horario.to + graceMin) continue;
+          const sid = staff.wixResourceId || staff._id;
+          // ¿solape con ocupados de ese staff?
+          const haySolape = ocupados.some(o =>
+            o.staffId && o.staffId === sid &&
+            m < o.endMin && mCorte > o.startMin
+          );
+          if (!haySolape) { alguienLibre = true; break; }
+        }
+        if (!alguienLibre) continue;
+
+        // ── TRAMO B · profesional de complementos ──
+        if (dual) {
+          if (mCorte < horarioExtra.from) continue;
+          if (m + dur > horarioExtra.to + graceMin) continue;
+          const solapeExtra = ocupados.some(o =>
+            o.staffId && o.staffId === sidExtra &&
+            mCorte < o.endMin && (m + dur) > o.startMin
+          );
+          if (solapeExtra) continue;
+        }
+
+        huecos.push(fmtHHMM(m));
+      }
+
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+      const modoLog = dual
+        ? ` | 👥 DOS TRAMOS: principal ${durPrincipal}min + complementos ${durExtra}min con ${staffExtraRow.displayName || staffExtraRow.canonicalName || sidExtra}`
+        : '';
+      const bufferLog = (minAdmisible > 0)
+        ? ` | ⏱️ hoy: desde ${fmtHHMM(minAdmisible)} (antelación ${bufferMin}min)`
+        : '';
+      console.log(`${TAG} ✅ huecos ${fecha} dow=${dow} proId=${proId || 'any'} dur=${dur}min: ${huecos.length} slots (abre ${fmtHHMM(minFrom)}, cierra ${fmtHHMM(maxTo)}, grace ${graceMin}min)${bufferLog}${modoLog}. ${elapsed}s`);
+
+      return {
+        ok: true, version: VERSION,
+        fecha, proId, durationMin: dur,
+        huecos,
+        abreA: fmtHHMM(minFrom),
+        cierraA: fmtHHMM(maxTo)
+      };
+
+    } catch (e) {
+      console.error(`${TAG} ❌ getHuecosDisponibles:`, e.message);
+      return { ok: false, version: VERSION, error: safeErr(e), huecos: [] };
+    }
+  }
+);
+
+// =====================================================
+// 6 · CREAR RESERVA PÚBLICA (wrapper de crearPackReserva)
+// =====================================================
+// Delega en backend/recepcionProLogic.crearPackReserva. Aísla el iframe
+// público de la API interna y valida el contrato mínimo antes de tocar
+// Recepción Pro.
+//
+// Entrada esperada (mismos campos que el form del widget genera):
+//   {
+//     fecha: 'YYYY-MM-DD',
+//     horaHHmm: 'HH:mm',
+//     principalSetupUid: '<setupUid>',
+//     complementosSetupUid: ['<setupUid>', ...],   // opcional
+//     staffId: '<wixResourceId>' | 'any',
+//     staffName: '<nombre>',                        // opcional, informativo
+//     contactDetails: { firstName, lastName, email, phone },
+//     memberContactId: '<guid>' | null,             // si miembro logueado
+//     notas: ''                                     // opcional
+//   }
+//
+// Validación mínima (rápido fallar antes de tocar Wix Bookings):
+//   - fecha + horaHHmm + principalSetupUid obligatorios
+//   - staffId obligatorio (puede ser 'any')
+//   - O memberContactId, O contactDetails con (firstName+phone) o
+//     (firstName+email); si no hay nada, error.
+//
+// Devuelve el resultado tal cual de crearPackReserva.
+
+// v0.9.0 — Resuelve la duración del TRAMO DEL PRINCIPAL para una reserva
+// concreta. Misma query y mismo mapa `porSetupUid` que usa
+// `getHuecosDisponibles` en su bloque 3-bis, para que el corte que se
+// valida al crear sea EXACTAMENTE el mismo que se validó al ofrecer la hora.
+//
+// Devuelve null si no se puede resolver (sin setupUid, servicio no
+// encontrado, error de query, o corte fuera de rango) → el llamante cae a
+// modo mono-profesional.
+async function resolverDurPrincipalTramo(principalSetupUid, durTotal) {
+  if (!principalSetupUid || !(durTotal > 0)) return null;
+  try {
+    // v0.9.8 — Sin filtro de uso, por el mismo motivo que en el bloque 3-bis
+    // de getHuecosDisponibles: el corte que valida la guardia al crear debe
+    // medirse con las MISMAS fases que midió el motor al ofrecer la hora.
+    const rCat = await wixData.query(CMS_CATALOGO)
+      .eq('active', true)
+      .limit(1000)
+      .find({ suppressAuth: true });
+    const allCat = rCat.items || [];
+    const porSetupUidCat = {};
+    for (const c of allCat) if (c.setupUid) porSetupUidCat[c.setupUid] = c;
+
+    const svcPrincipal = porSetupUidCat[principalSetupUid];
+    if (!svcPrincipal) return null;
+
+    const dp = calcularDurPrincipalCascada(svcPrincipal, porSetupUidCat);
+    if (dp > 0 && dp < durTotal) return dp;
+    return null;
+  } catch (e) {
+    console.warn(`${TAG} ⚠️ resolverDurPrincipalTramo no concluyente: ${e.message}`);
+    return null;
+  }
+}
+
+export const crearReservaPublica = webMethod(
+  Permissions.Anyone,
+  async (payload) => {
+    const t0 = Date.now();
+    try {
+      const {
+        fecha,
+        horaHHmm,
+        principalSetupUid,
+        complementosSetupUid = [],
+        staffId,
+        staffName = '',
+        contactDetails = {},
+        memberContactId = '',
+        notas = '',
+        // v0.7.7 — Variante del servicio PRINCIPAL (servicios
+        // simple_variantes: Corte Mujer M/L/XL). Shape:
+        // { idx, label, price, duration }. Si el cliente eligió la
+        // variante BASE (M), el bundle público no envía este campo →
+        // undefined → backend usa precio/duración base como siempre.
+        // Si eligió L/XL, el bundle envía el objeto con los valores de
+        // la variante y crearPackReserva v1.0.25 los aplica al precio
+        // y duración totales de la reserva. Paridad estricta con
+        // Recepción PRO Desktop v1.1.43 y con Lite Mobile v0.5.0.
+        varianteSel = null,
+        // v0.7.9 — Duración TOTAL de la cita (principal + variante +
+        // complementos), enviada por el bundle v2.0.16 y propagada por el
+        // page code v0.3.3. Es la MISMA cifra que el widget pasó a
+        // getHuecosDisponibles para ofrecer la hora. Se usa para resolver
+        // 'any' comprobando que el profesional esté libre en TODO el bloque
+        // continuo que el motor de huecos ya validó (máxima seguridad; el
+        // PROCESO no se libera al público en el arranque de V2). Si no
+        // llegara (payload antiguo), el resolvedor cae a la duración base
+        // del principal como red de seguridad mínima.
+        durationMin = null,
+        // v0.9.0 — Segundo profesional para los complementos (recuperación
+        // del `empleado2Id` de V1). wixResourceId concreto. Si no llega,
+        // llega vacío, llega 'any', o coincide con `staffId` → toda la cita
+        // va al profesional principal, comportamiento v0.8.0 idéntico.
+        staffExtraId = ''
+      } = payload || {};
+
+      // Validación mínima de campos
+      if (!fecha || !horaHHmm || !principalSetupUid) {
+        return { ok: false, version: VERSION, error: { message: 'Faltan campos obligatorios (fecha, hora, servicio).' } };
+      }
+      if (!staffId) {
+        return { ok: false, version: VERSION, error: { message: 'Falta profesional (puede ser "any").' } };
+      }
+
+      // v0.8.0 — Margen del salón (SalonConfig.closingGraceMin). Se pasa
+      // a resolverStaffLibre y se usa en la guardia defensiva final que
+      // valida que la reserva NO desborde el `to` del staff + este margen.
+      // Vacío / null / error → 0 (comportamiento estricto v0.7.9).
+      // v0.9.7 — la misma lectura trae la antelación mínima.
+      const { graceMin, bufferMin } = await leerConfigMotor();
+
+      // ─────────────────────────────────────────────────────────────
+      // v0.9.7 — ⛔ GUARDIA: NADA EN EL PASADO
+      // ─────────────────────────────────────────────────────────────
+      // El motor de huecos ya no ofrece horas pasadas, pero esta guardia
+      // es imprescindible: entre que el cliente ve la rejilla y pulsa
+      // "Reservar" pueden pasar minutos u horas (pestaña abierta, móvil
+      // en el bolsillo), y el payload también puede llegar manipulado.
+      // Se comprueba ANTES de tocar catálogo, staff o CMS: es aritmética
+      // pura sobre datos ya leídos.
+      {
+        const minAdmisible = minimoInicioAdmisible(fecha, bufferMin);
+        const inicioMin = parseHHMM(horaHHmm);
+
+        if (minAdmisible === null || (inicioMin != null && inicioMin < minAdmisible)) {
+          console.warn(`${TAG} ⛔ Reserva rechazada por hora pasada: ${fecha} ${horaHHmm} (antelación mínima ${bufferMin}min).`);
+          return {
+            ok: false,
+            version: VERSION,
+            error: {
+              message: bufferMin > 0
+                ? `Esa hora ya no está disponible. Las reservas online necesitan al menos ${bufferMin} minutos de antelación.`
+                : 'Esa hora ya ha pasado. Elige otro horario.'
+            }
+          };
+        }
+      }
+
+      // Validación de identidad mínima:
+      // o memberContactId, o contactDetails con nombre + (telefono o email).
+      const cd = contactDetails || {};
+      const tieneIdentidadMinima = !!memberContactId ||
+        (cd.firstName && (cd.phone || cd.email));
+
+      if (!tieneIdentidadMinima) {
+        return { ok: false, version: VERSION, error: { message: 'Faltan datos del cliente (nombre + teléfono o email).' } };
+      }
+
+      // v0.6.0 — Validar que el staffId está PERMITIDO para este servicio.
+      // El campo idStaff (Object {ids:[...]}) en ServiceCatalog dicta quién
+      // puede ejecutar el servicio. Defensa en backend porque el cliente
+      // pudo manipular el payload aunque el widget filtre los chips.
+      try {
+        const rSvc = await wixData.query(CMS_CATALOGO)
+          .eq('setupUid', principalSetupUid)
+          .limit(1)
+          .find({ suppressAuth: true });
+        const svc = rSvc.items?.[0];
+        if (!svc) {
+          return { ok: false, version: VERSION, error: { message: 'Servicio no encontrado en el catálogo.' } };
+        }
+        const idsPermitidos = Array.isArray(svc.idStaff?.ids) ? svc.idStaff.ids : [];
+        // Lista vacía = todos los staff activos pueden hacerlo (fallback liberal).
+        if (idsPermitidos.length && staffId !== 'any') {
+          if (!idsPermitidos.includes(String(staffId))) {
+            console.warn(`${TAG} ⚠️ Intento de reserva con staff NO permitido: staffId=${staffId} servicio=${svc.label}`);
+            return { ok: false, version: VERSION, error: { message: 'El profesional seleccionado no realiza este servicio.' } };
+          }
+        }
+      } catch (vErr) {
+        // Si la validación falla por error técnico, no bloqueamos —
+        // mejor permitir la reserva que tirarla por un fallo de query.
+        console.warn(`${TAG} ⚠️ Validación idStaff no concluyente: ${vErr.message}`);
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // v0.7.8 — RESOLVER 'any' A UN HUMANO REAL LIBRE (Conceptos §4B)
+      // v0.7.9 — La comprobación usa la DURACIÓN TOTAL de la cita.
+      // ─────────────────────────────────────────────────────────────
+      // Bug crítico (v0.7.8): cuando el cliente elegía "Cualquiera"
+      // (staffId='any'), este wrapper pasaba staffId='' a crearPackReserva
+      // y la reserva se insertaba en KamisuiteReservations SIN empleado
+      // → Recepción Pro no la pintaba en ninguna columna. Regla §4B: todo
+      // backend que cree una reserva DEBE resolver 'any' a un humano real
+      // libre ANTES de crear, o RECHAZAR si no hay ninguno. Nunca crear
+      // con staff vacío.
+      //
+      // Reutiliza resolverStaffLibre (que replica la lógica interna ya
+      // probada de getHuecosDisponibles: horario + cruce con
+      // KamisuiteReservations + solape). idStaffPermitidos = los mismos
+      // que restringe el motor de huecos para este servicio.
+      //
+      // v0.7.9 — DURACIÓN usada para el rango: la DURACIÓN TOTAL de la
+      // cita (durationMin), que el bundle v2.0.16 calcula (principal +
+      // variante + complementos) y es la MISMA que pasó a
+      // getHuecosDisponibles para ofrecer esta hora. Así el profesional
+      // asignado queda garantizado libre en el MISMO bloque continuo que
+      // el motor de huecos validó — máxima seguridad, coherente con la ley
+      // conservadora (el PROCESO no se libera al público en V2). Si el
+      // payload no trae durationMin (compatibilidad con page code antiguo),
+      // se cae a la duración BASE del principal como red mínima.
+      let staffIdFinal = (staffId === 'any') ? '' : staffId;
+      let staffNameFinal = staffName;
+
+      // ─────────────────────────────────────────────────────────────
+      // v0.9.0 — SEGUNDO PROFESIONAL PARA LOS COMPLEMENTOS
+      // ─────────────────────────────────────────────────────────────
+      // Se resuelve ANTES que el 'any' del principal porque, en modo dos
+      // tramos, el principal solo ocupa [inicio, inicio+durPrincipal) y su
+      // resolución debe hacerse con ESA duración, no con la total.
+      //
+      // El segundo profesional NO se valida contra el `idStaff` del
+      // servicio principal: no lo ejecuta, ejecuta los complementos. Sí se
+      // valida que exista y esté activo en StaffConfig (defensa contra
+      // payload manipulado).
+      const staffExtraLimpio = (typeof staffExtraId === 'string') ? staffExtraId.trim() : '';
+      let staffIdExtraFinal = '';
+      let staffNameExtraFinal = '';
+      let durPrincipalTramo = null;
+
+      if (staffExtraLimpio && staffExtraLimpio !== 'any' && staffExtraLimpio !== staffId) {
+        durPrincipalTramo = await resolverDurPrincipalTramo(principalSetupUid, toNum(durationMin));
+
+        if (durPrincipalTramo == null) {
+          console.warn(`${TAG} ⚠️ staffExtraId recibido pero el corte de tramos no es resoluble → toda la cita al profesional principal.`);
+        } else {
+          try {
+            const rStaffExtra = await wixData.query(CMS_STAFF)
+              .eq('active', true)
+              .limit(100)
+              .find({ suppressAuth: true });
+            const rowExtra = (rStaffExtra.items || []).find(s =>
+              s.wixResourceId === staffExtraLimpio || s._id === staffExtraLimpio
+            );
+            if (!rowExtra) {
+              console.warn(`${TAG} ⚠️ staffExtraId=${staffExtraLimpio} no encontrado/activo en StaffConfig → reserva rechazada.`);
+              return {
+                ok: false, version: VERSION,
+                error: { message: 'El profesional elegido para los complementos no está disponible.' }
+              };
+            }
+            const canonExtra = String(rowExtra.canonicalName || '').toUpperCase();
+            if (String(rowExtra.notes || '').includes(NOTA_RECURSO_INTERNO)
+                || canonExtra === 'CUALQUIERA' || canonExtra === 'PROCESO') {
+              console.warn(`${TAG} ⚠️ staffExtraId=${staffExtraLimpio} es un recurso interno → rechazado.`);
+              return {
+                ok: false, version: VERSION,
+                error: { message: 'El profesional elegido para los complementos no es válido.' }
+              };
+            }
+            staffIdExtraFinal = rowExtra.wixResourceId || rowExtra._id;
+            staffNameExtraFinal = nombreStaffLimpio(rowExtra.displayName || rowExtra.canonicalName);
+            console.log(`${TAG} 👥 Dos tramos: principal ${durPrincipalTramo}min | complementos ${toNum(durationMin) - durPrincipalTramo}min con ${staffNameExtraFinal || staffIdExtraFinal}`);
+          } catch (eExtra) {
+            console.warn(`${TAG} ⚠️ No se pudo resolver el segundo profesional: ${eExtra.message} → toda la cita al principal.`);
+            staffIdExtraFinal = '';
+            staffNameExtraFinal = '';
+            durPrincipalTramo = null;
+          }
+        }
+      }
+
+      // Duración que ocupa el PROFESIONAL PRINCIPAL. En modo mono es la
+      // duración total; en modo dos tramos, solo su tramo.
+      const durTramoPrincipal = (staffIdExtraFinal && durPrincipalTramo != null)
+        ? durPrincipalTramo
+        : toNum(durationMin);
+
+      if (staffId === 'any') {
+        let idsPermitidosResolver = [];
+        let durResolver = toNum(durTramoPrincipal);
+        try {
+          const rSvcDur = await wixData.query(CMS_CATALOGO)
+            .eq('setupUid', principalSetupUid)
+            .limit(1)
+            .find({ suppressAuth: true });
+          const svcDur = rSvcDur.items?.[0];
+          if (svcDur) {
+            idsPermitidosResolver = Array.isArray(svcDur.idStaff?.ids) ? svcDur.idStaff.ids : [];
+            // Fallback: si no llegó durationMin del payload, usar la
+            // duración base del principal (comportamiento v0.7.8).
+            if (!(durResolver > 0)) durResolver = toNum(svcDur.duration);
+          }
+        } catch (durErr) {
+          console.warn(`${TAG} ⚠️ No se pudo leer idStaff/duración base para resolver 'any': ${durErr.message}`);
+        }
+        if (!(durResolver > 0)) durResolver = 60; // último recurso
+
+        console.log(`${TAG} 🔎 Resolviendo 'any' con duración total ${durResolver}min (${durationMin ? 'payload' : 'fallback base'})`);
+
+        // v0.8.0 — se pasa graceMin (SalonConfig.closingGraceMin) para
+        // que el resolvedor considere el margen del salón al validar el
+        // horario del staff. Coherente con el filtro de getHuecosDisponibles.
+        const elegido = await resolverStaffLibre({
+          fecha,
+          horaHHmm,
+          durationMin: durResolver,
+          idStaffPermitidos: idsPermitidosResolver,
+          graceMin
+        });
+
+        if (!elegido) {
+          // Regla §4B: si no hay humano libre, RECHAZAR — nunca crear
+          // la reserva con staff vacío.
+          console.warn(`${TAG} ⚠️ 'any' sin humano libre a ${fecha} ${horaHHmm} (dur ${durResolver}min) → reserva rechazada`);
+          return {
+            ok: false,
+            version: VERSION,
+            error: { message: 'No hay ningún profesional disponible a esa hora. Prueba con otro horario.' }
+          };
+        }
+
+        staffIdFinal = elegido.staffId;
+        staffNameFinal = elegido.staffName || staffName || '';
+        console.log(`${TAG} ✅ 'any' resuelto a ${staffNameFinal || staffIdFinal}`);
+      }
+
+      // ─────────────────────────────────────────────────────────────
+      // v0.8.0 — GUARDIA DEFENSIVA FINAL de horario del staff
+      // ─────────────────────────────────────────────────────────────
+      // Verifica que la reserva NO desborde el `to` del horario del staff
+      // (ya sea staff concreto o resuelto de 'any') más `graceMin`. Red
+      // de seguridad ante payloads manipulados (DevTools / URL / caching
+      // desincronizado) que no hayan pasado por getHuecosDisponibles.
+      //
+      // Requiere durationMin del payload (bundle v2.0.16+). Si no llega
+      // (page code muy antiguo) se salta silenciosamente — resolverStaffLibre
+      // ya cubrió el caso de 'any', y para staff concreto el motor de huecos
+      // filtró antes. La guardia es una capa extra, no la única defensa.
+      try {
+        const gDurTotal = toNum(durationMin);
+        const gInicioMin = parseHHMM(horaHHmm);
+        if (gDurTotal > 0 && gInicioMin != null && staffIdFinal) {
+          const rStaffFinal = await wixData.query(CMS_STAFF)
+            .eq('active', true)
+            .limit(100)
+            .find({ suppressAuth: true });
+          const staffRow = (rStaffFinal.items || []).find(s =>
+            s.wixResourceId === staffIdFinal || s._id === staffIdFinal
+          );
+
+          // v0.9.0 — En modo dos tramos, el que cierra la cita es el
+          // SEGUNDO profesional. Cada tramo se valida contra su dueño:
+          //   · principal → [inicio, inicio+durTramoPrincipal)
+          //   · extra     → [inicio+durTramoPrincipal, inicio+durTotal)
+          const gDurPrincipal = (staffIdExtraFinal && durPrincipalTramo != null)
+            ? durPrincipalTramo
+            : gDurTotal;
+
+          if (staffIdExtraFinal && durPrincipalTramo != null) {
+            const staffRowExtra = (rStaffFinal.items || []).find(s =>
+              s.wixResourceId === staffIdExtraFinal || s._id === staffIdExtraFinal
+            );
+            if (staffRowExtra) {
+              const [ey, emo, ed] = String(fecha).split('-').map(Number);
+              const edow = new Date(ey, emo - 1, ed).getDay();
+              const eHorario = leerHorarioStaffEnDia(staffRowExtra, edow);
+              if (eHorario) {
+                const eInicioMin = gInicioMin + gDurPrincipal;
+                const eFinMin = gInicioMin + gDurTotal;
+                if (eInicioMin < eHorario.from || eFinMin > eHorario.to + graceMin) {
+                  console.warn(`${TAG} ⚠️ Guardia horario (tramo complementos): ${fmtHHMM(eInicioMin)}–${fmtHHMM(eFinMin)} fuera del horario de ${staffNameExtraFinal || staffIdExtraFinal} (${fmtHHMM(eHorario.from)}–${fmtHHMM(eHorario.to)} +grace ${graceMin}). Reserva rechazada.`);
+                  return {
+                    ok: false,
+                    version: VERSION,
+                    error: { message: 'La reserva excede el horario del profesional de los complementos. Elige otro horario.' }
+                  };
+                }
+              } else {
+                console.warn(`${TAG} ⚠️ Guardia horario: staff extra ${staffIdExtraFinal} sin horario para ese día → guardia del tramo B omitida`);
+              }
+            } else {
+              console.warn(`${TAG} ⚠️ Guardia horario: staff extra ${staffIdExtraFinal} no encontrado en StaffConfig → guardia del tramo B omitida`);
+            }
+          }
+
+          if (staffRow) {
+            const [gy, gmo, gd] = String(fecha).split('-').map(Number);
+            const gdow = new Date(gy, gmo - 1, gd).getDay();
+            const gHorario = leerHorarioStaffEnDia(staffRow, gdow);
+            if (gHorario) {
+              const gFinMin = gInicioMin + gDurPrincipal;
+              if (gFinMin > gHorario.to + graceMin) {
+                console.warn(`${TAG} ⚠️ Guardia horario: ${fecha} ${horaHHmm}+${gDurPrincipal}min = ${fmtHHMM(gFinMin)} desborda staff.to ${fmtHHMM(gHorario.to)} +grace ${graceMin} = ${fmtHHMM(gHorario.to + graceMin)}. Reserva rechazada.`);
+                return {
+                  ok: false,
+                  version: VERSION,
+                  error: { message: 'La reserva excede el horario del profesional. Elige otro horario.' }
+                };
+              }
+            } else {
+              // Sin horario configurado para ese dow: no bloqueamos (mismo
+              // criterio permisivo que resolverStaffLibre ante staff sin
+              // horario resoluble → deja pasar). Solo log.
+              console.warn(`${TAG} ⚠️ Guardia horario: staff ${staffIdFinal} sin horario para dow=${gdow} → guardia omitida`);
+            }
+          } else {
+            console.warn(`${TAG} ⚠️ Guardia horario: staff ${staffIdFinal} no encontrado en StaffConfig → guardia omitida`);
+          }
+        }
+      } catch (gErr) {
+        // Cualquier fallo técnico de la guardia NO bloquea la reserva
+        // (mejor una reserva legítima que un rechazo por bug de query).
+        console.warn(`${TAG} ⚠️ Guardia horario no concluyente: ${gErr.message}`);
+      }
+
+      // Delegar en crearPackReserva del backend de Recepción Pro.
+      // Import dinámico para no acoplar el módulo en tiempo de carga.
+      const { crearPackReserva } = await import('backend/recepcionProLogic.web');
+
+      const resultado = await crearPackReserva({
+        fecha,
+        horaHHmm,
+        principalSetupUid,
+        complementosSetupUid: Array.isArray(complementosSetupUid) ? complementosSetupUid : [],
+        staffId: staffIdFinal,
+        staffName: staffNameFinal,
+        contactDetails: {
+          firstName: cd.firstName || '',
+          lastName: cd.lastName || '',
+          email: cd.email || '',
+          phone: cd.phone || ''
+        },
+        memberContactId: memberContactId || '',
+        notas: notas || '',
+        esProvisional: false,    // reservas públicas SÍ persisten en CRM
+        origenRecepcion: false,  // v0.3.0 — origen WEB (no Recepción Pro)
+        // v0.7.7 — Variante del principal (null si base o si el servicio
+        // no tiene variantes). crearPackReserva v1.0.25 lo procesa.
+        varianteSel: varianteSel || null
+      });
+
+      const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
+      if (resultado?.ok) {
+        console.log(`${TAG} ✅ crearReservaPublica: reservaId=${resultado.reservaId} | ${fecha} ${horaHHmm} +${toNum(durationMin)}min | staff=${staffNameFinal || staffIdFinal}${staffIdExtraFinal ? ` +extra=${staffNameExtraFinal || staffIdExtraFinal}` : ''} | ${resultado.precioTotal}€ | ${elapsed}s`);
+
+        // ─────────────────────────────────────────────────────────────
+        // v0.9.0 — REPARTO ENTRE DOS PROFESIONALES (fases del tramo B)
+        // ─────────────────────────────────────────────────────────────
+        // Se hace AQUÍ, en el backend del widget público, y NO dentro de
+        // crearPackReserva: ese motor lo comparten Recepción PRO Desktop y
+        // Lite Mobile, y esta capacidad es exclusiva del cliente que
+        // reserva online. Así el motor de packs queda intacto en producción.
+        //
+        // Patrón READ-MERGE-UPDATE (regla de oro del proyecto:
+        // `wixData.update` reemplaza el documento entero, nunca se pasa un
+        // objeto parcial): se lee el registro completo recién insertado, se
+        // modifican SOLO los `staffId` de las fases del tramo B y se
+        // devuelve el documento entero con esa única diferencia.
+        //
+        // Las sessions de Wix Bookings NO se tocan: se crean en el
+        // scheduleId del ancla de familia y no llevan staff — el estilista
+        // real vive únicamente en el CMS. El campo `fases[].staffId` ya
+        // existe como override por fase (lo escribe el drag&drop de V2) y
+        // lo respeta el motor de huecos de este mismo archivo
+        // (`f.staffId || r.staffId`), así que la reserva repartida se
+        // interpreta bien en ocupación y en el calendario desde el minuto uno.
+        //
+        // REGLA DE CORTE (la misma que validó getHuecosDisponibles al
+        // ofrecer la hora, para que lo reservado coincida con lo comprobado):
+        //   · CON fase PROCESO → el principal conserva todo hasta el final
+        //     de la PRIMERA fase que ocupa después del proceso (el "lavado"
+        //     de V1). Lo posterior → segundo profesional.
+        //   · SIN fase PROCESO → el principal conserva todo hasta antes de
+        //     la primera fase 'COMPLEMENTO'. De ahí al final → segundo.
+        //
+        // Todo el bloque va en try/catch NO-BLOCKING: la reserva ya está
+        // creada y es válida. Si el reparto fallara, la cita queda íntegra
+        // con el profesional principal (degradación segura, nunca una
+        // reserva rota ni perdida).
+        if (staffIdExtraFinal && resultado.reservaId) {
+          try {
+            const regReserva = await wixData.get('KamisuiteReservations', resultado.reservaId, { suppressAuth: true });
+            const fasesReserva = jsonIn(regReserva?.fases, 'items');
+
+            if (Array.isArray(fasesReserva) && fasesReserva.length) {
+              let idxCorte = -1;
+
+              const idxProceso = fasesReserva.findIndex(f => f && f.tipo === 'proceso');
+              if (idxProceso >= 0) {
+                let idxLavado = -1;
+                for (let i = idxProceso + 1; i < fasesReserva.length; i++) {
+                  if (fasesReserva[i] && fasesReserva[i].ocupa === true) { idxLavado = i; break; }
+                }
+                if (idxLavado >= 0 && idxLavado + 1 < fasesReserva.length) {
+                  idxCorte = idxLavado + 1;
+                }
+              } else {
+                const idxComp = fasesReserva.findIndex(f => f && f.fase === 'COMPLEMENTO');
+                if (idxComp >= 0) idxCorte = idxComp;
+              }
+
+              if (idxCorte >= 0) {
+                let nFases = 0;
+                for (let i = idxCorte; i < fasesReserva.length; i++) {
+                  if (!fasesReserva[i]) continue;
+                  fasesReserva[i].staffId = staffIdExtraFinal;
+                  nFases++;
+                }
+
+                // MERGE: documento completo + solo las fases cambiadas.
+                const regActualizado = Object.assign({}, regReserva, {
+                  fases: { items: fasesReserva }
+                });
+                await wixData.update('KamisuiteReservations', regActualizado, { suppressAuth: true });
+
+                // Reflejar el reparto en lo que se devuelve al widget.
+                resultado.fases = fasesReserva;
+
+                console.log(`${TAG} 👥 Reparto aplicado: ${nFases} fase/s desde índice ${idxCorte} → ${staffNameExtraFinal || staffIdExtraFinal} (resto: ${staffNameFinal || staffIdFinal})`);
+              } else {
+                console.log(`${TAG} ℹ️ Segundo profesional elegido pero la cita no tiene tramo posterior que repartir → todo al principal.`);
+              }
+            }
+          } catch (repErr) {
+            console.warn(`${TAG} ⚠️ No se pudo aplicar el reparto de profesionales (la reserva ${resultado.reservaId} queda íntegra con ${staffNameFinal || staffIdFinal}): ${repErr.message}`);
+          }
+        }
+
+        // ─────────────────────────────────────────────────────────────
+        // v0.5.0 — CENTRALITA DE COMUNICACIONES
+        // Patrón copiado literalmente de simplesLogic v1.5.0 / coloracionLogic
+        // v3.2.7 / tratamientosLogic v1.0.9. Envuelto en try/catch no-blocking:
+        // si la centralita falla, la reserva ya está creada — el cliente
+        // simplemente no recibe la notificación, sin afectar al booking.
+        // ─────────────────────────────────────────────────────────────
+        try {
+          // 1) Resolver nombre del servicio principal (label en ServiceCatalog).
+          let serviciosStr = 'Tu cita';
+          try {
+            const rSvc = await wixData.query(CMS_CATALOGO)
+              .eq('setupUid', principalSetupUid)
+              .limit(1)
+              .find({ suppressAuth: true });
+            if (rSvc.items?.[0]?.label) serviciosStr = rSvc.items[0].label;
+          } catch (_) { /* fallback al default */ }
+
+          // 2) Resolver nombre del estilista asignado.
+          //    v0.7.8 — Si el cliente eligió 'any', staffNameFinal ya
+          //    trae el nombre del humano resuelto por resolverStaffLibre.
+          //    Fallback (por robustez): leer de resultado.fases[0].staffId.
+          let estilistaStr = staffNameFinal || '';
+          if (!estilistaStr) {
+            const staffIdReal = resultado?.fases?.[0]?.staffId;
+            if (staffIdReal) {
+              try {
+                const rStaff = await wixData.query(CMS_STAFF)
+                  .eq('wixResourceId', staffIdReal)
+                  .limit(1)
+                  .find({ suppressAuth: true });
+                estilistaStr = rStaff.items?.[0]?.displayName
+                            || rStaff.items?.[0]?.canonicalName
+                            || '';
+              } catch (_) { /* sin nombre, va sin */ }
+            }
+          }
+
+          // ─────────────────────────────────────────────────────────────
+          // v0.9.1 — COMPLEMENTOS Y SU PROFESIONAL EN LA NOTIFICACIÓN
+          // ─────────────────────────────────────────────────────────────
+          // La plantilla de WhatsApp (whatsappLogic → TEMPLATE_CONFIRMACION)
+          // tiene 8 parámetros POSICIONALES fijos aprobados por Meta:
+          //   {{1}} nombreCliente  {{2}} brandName  {{3}} servicios
+          //   {{4}} estilista      {{5}} fechaHora  {{6}} address
+          //   {{7}} invoiceEmail   {{8}} phone
+          // Añadir un {{9}} exigiría crear plantilla nueva y pasar por
+          // aprobación de Meta. Por eso los complementos y su profesional
+          // se incorporan DENTRO de {{3}} y {{4}}, que es donde el cliente
+          // ya lee el servicio y la persona.
+          //
+          // Fuente de datos: `resultado.fases`, ya con el reparto aplicado.
+          // Solo se listan las fases 'COMPLEMENTO' (las que el cliente
+          // eligió). Las fases INCLUIDAS de cascada (lavado, secado) NO se
+          // listan: no las eligió y van embebidas en el servicio.
+          //
+          // Los parámetros de plantilla de WhatsApp no admiten saltos de
+          // línea ni espacios múltiples, así que todo se normaliza a una
+          // sola línea antes de enviarse.
+          const unaLinea = (s) => String(s || '').replace(/\s+/g, ' ').trim();
+
+          const fasesFinales = Array.isArray(resultado?.fases) ? resultado.fases : [];
+          const fasesComp = fasesFinales.filter(f => f && f.fase === 'COMPLEMENTO' && f.label);
+
+          if (fasesComp.length) {
+            const labelsComp = [...new Set(fasesComp.map(f => unaLinea(f.label)).filter(Boolean))];
+            if (labelsComp.length) {
+              serviciosStr = `${serviciosStr} + ${labelsComp.join(' + ')}`;
+            }
+
+            // Si hubo segundo profesional, decir QUÉ complementos hace él.
+            if (staffIdExtraFinal && staffNameExtraFinal) {
+              const suyos = [...new Set(
+                fasesComp
+                  .filter(f => f.staffId && f.staffId === staffIdExtraFinal)
+                  .map(f => unaLinea(f.label))
+                  .filter(Boolean)
+              )];
+              if (suyos.length) {
+                estilistaStr = `${estilistaStr} · ${suyos.join(' y ')} con ${staffNameExtraFinal}`;
+              }
+            }
+          }
+
+          serviciosStr = unaLinea(serviciosStr);
+          estilistaStr = unaLinea(estilistaStr);
+
+          // 3) Fecha bonita DD/MM/YYYY (formato V1 esperado por driver WhatsApp).
+          const [yy, mm2, dd] = String(fecha).split('-');
+          const fechaBonita = `${dd}/${mm2}/${yy}`;
+
+          // 4) Hora final = horaInicio + duracionTotal.
+          const [hh, mi] = String(horaHHmm).split(':').map(Number);
+          const totalMin = Number(resultado?.duracionTotal) || 0;
+          const endMin = hh * 60 + mi + totalMin;
+          const eh = Math.floor(endMin / 60);
+          const em = endMin % 60;
+          const horaFinal = String(eh).padStart(2, '0') + ':' + String(em).padStart(2, '0');
+
+          const importeStr = `${resultado?.precioTotal || 0}€`;
+          // Origen 'Reserva Online' como en V1 — distingue del de Recepción Pro.
+          const origenStr = 'Reserva Online';
+          // Las reservas web no pagan online aún (futuro: integración pasarela).
+          const estadoPagoStr = 'Pago en salón';
+          const nombreCliente = `${cd.firstName || ''}${cd.lastName ? ' ' + cd.lastName : ''}`.trim();
+
+          // 5) Invocación a la centralita. Import dinámico para no acoplar
+          //    el módulo en tiempo de carga del backend.
+          const { notificarConfirmacion } = await import('backend/comunicacionesLogic.web');
+          await notificarConfirmacion({
+            contactId:     resultado?.contactId || memberContactId || '',
+            email:         cd.email || '',
+            telefono:      cd.phone || '',
+            nombreCliente,
+            fecha:         fechaBonita,
+            hora:          horaHHmm,
+            servicios:     serviciosStr,
+            estilista:     estilistaStr,
+            // emailVariables idénticas en estructura a las que usa V1
+            // (simplesLogic v1.5.0 / coloracionLogic v3.2.7) para que el
+            // template Wix existente reciba los mismos campos sin cambios.
+            emailVariables: {
+              Fecha:         fechaBonita,
+              Nombre:        cd.firstName || '',
+              Apellido:      cd.lastName || '',
+              servicios:     serviciosStr,
+              profesional:   estilistaStr,
+              horaInicio:    horaHHmm,
+              horaFinal:     horaFinal,
+              importeTotal:  importeStr,
+              origen:        origenStr,
+              estadoPago:    estadoPagoStr
+            }
+          });
+          console.log(`${TAG} ✅ Notificación via centralita disparada`);
+        } catch (notifErr) {
+          console.error(`${TAG} ⚠️ notificarConfirmacion (no-blocking): ${notifErr.message}`);
+        }
+        // ─── fin centralita ──────────────────────────────────────────
+
+      } else {
+        console.warn(`${TAG} ⚠️ crearReservaPublica falló: ${JSON.stringify(resultado?.error || {})}`);
+      }
+      return resultado;
+
+    } catch (e) {
+      console.error(`${TAG} ❌ crearReservaPublica:`, e.message);
+      return { ok: false, version: VERSION, error: safeErr(e) };
+    }
+  }
+);
+
+// =====================================================
+// 6·bis · GET COMPOSICIÓN SERVICIO        ◄── NUEVO v0.11.0
+// =====================================================
+// PARA QUÉ EXISTE
+// ---------------
+// Hasta v0.10.0, la composición de una cita —qué hay que elegir y cuánto
+// suma— se armaba EN EL NAVEGADOR: el bundle público (`_calc()`) partía de
+// lo que devuelve `adaptarServicio`, aplicaba la variante elegida, sumaba
+// los complementos marcados y de ahí salían las dos cifras que gobiernan
+// todo lo demás: `durationMin` (la que se le pasa a getHuecosDisponibles y
+// luego a crearReservaPublica) y el precio del resumen.
+//
+// Cualquier superficie SIN navegador —AKIRA, y mañana WhatsApp o teléfono—
+// se queda sin esa cuenta. Reimplementarla aparte garantiza que un día se
+// separen y se ofrezcan horas mal medidas: exactamente el fallo del Lavado
+// perdido (v0.9.8) pero por duplicado permanente.
+//
+// Esta función baja esa cuenta al backend SIN tocar el camino del widget.
+// El bundle sigue haciendo lo que hace hoy; nadie más la usa todavía.
+//
+// DOS MODOS EN UNA SOLA FUNCIÓN
+// -----------------------------
+//   · SIN `seleccion` → devuelve la COMPOSICIÓN: variantes, complementos
+//     opcionales, obligatorios y grupos de elección, más `pendiente[]`,
+//     que es literalmente la lista de lo que hay que preguntar antes de
+//     poder reservar. Es el equivalente a abrir el panel del servicio.
+//   · CON `seleccion` → devuelve lo RESUELTO: precio, duración total y el
+//     `payload` ya montado para crearReservaPublica / crearPackReserva
+//     (complementosSetupUid + varianteSel + durationMin + idStaff).
+//     Si falta algo obligatorio NO adivina: devuelve `faltan_datos` con lo
+//     que queda pendiente.
+//
+// ÁMBITO (parámetro `ambito`)
+// ---------------------------
+//   · 'interno' (por defecto) → catálogo de Recepción PRO: uso kamisuite
+//     o ambos. Es lo que ve una recepcionista, y por tanto lo que debe ver
+//     AKIRA en la consola interna.
+//   · 'publico' → uso publico o ambos. Paridad estricta con el widget.
+//
+// ⚠️ DIVERGENCIA REAL ENTRE LAS DOS SUPERFICIES, RESPETADA AQUÍ.
+//    Un complemento OBLIGATORIO y SIN variantes (Caso A del motor: Lavado,
+//    Secado…) lo auto-materializa `construirFasesPack` en su posición de la
+//    cascada sin que nadie lo elija. Recepción PRO lo excluye de la lista
+//    (getCatalogoReserva v1.0.35: pedírselo al estilista es absurdo).
+//    El widget público, en cambio, lo pinta y exige un "sí" antes de
+//    habilitar RESERVAR (bundle v2.0.13). Los dos funcionan en producción.
+//    Aquí se conserva cada comportamiento en su ámbito: 'interno' lo oculta,
+//    'publico' lo mantiene. No se unifica por iniciativa propia.
+//
+// NO INVENTA NADA. Toda la aritmética es la del bundle v2.0.19 y toda la
+// resolución de catálogo es la de `adaptarServicio`, que se llama tal cual.
+// Las etiquetas del usuario se casan por clave normalizada (sin tildes,
+// sin mayúsculas, sin dobles espacios) y SOLO por coincidencia exacta: si
+// una etiqueta no casa con una opción y solo una, se devuelve pendiente
+// con las opciones, nunca se elige por aproximación.
+
+// Clave de comparación de etiquetas. Reutiliza `claveGrupo` para no tener
+// dos criterios de normalización distintos en el mismo archivo.
+function _claveEtiqueta(s) {
+  return claveGrupo(s);
+}
+
+// Etiqueta legible de una variante del principal. El editor las guarda como
+// {nombre, precio, duracion, tamano_estilo}; el bundle lee `label || nombre`.
+function _labelVariante(v, i) {
+  if (v && typeof v === 'object') {
+    const l = v.label || v.nombre || '';
+    return String(l).trim() || ('Opción ' + (i + 1));
+  }
+  return String(v || '').trim() || ('Opción ' + (i + 1));
+}
+
+function _precioVariante(v) {
+  if (!v || typeof v !== 'object') return null;
+  const raw = (v.precio != null) ? v.precio : v.price;
+  if (raw == null) return null;
+  const n = Number(raw);
+  return isNaN(n) ? null : n;
+}
+
+function _duracionVariante(v) {
+  if (!v || typeof v !== 'object') return 0;
+  const raw = (v.duracion != null) ? v.duracion : v.duration;
+  if (raw == null) return 0;
+  const n = Number(raw);
+  return isNaN(n) ? 0 : n;
+}
+
+// Opciones de variante del principal, incluida la BASE.
+// La base es una opción legítima: el patrón real es "base + variantes
+// explícitas del array" (bitácora 4-jul-2026). La regla "la base actúa
+// como M" era específica de bonos, no universal.
+function _opcionesVariantePrincipal(svc) {
+  const out = [{
+    id: 'base',
+    idx: -1,
+    label: 'Base',
+    price: (svc.basePrice == null) ? null : Number(svc.basePrice),
+    duration: toNum(svc.baseDuration)
+  }];
+  const vars = Array.isArray(svc.variantes) ? svc.variantes : [];
+  vars.forEach((v, i) => {
+    out.push({
+      id: 'v' + i,
+      idx: i,
+      label: _labelVariante(v, i),
+      price: _precioVariante(v),
+      duration: _duracionVariante(v)
+    });
+  });
+  return out;
+}
+
+// Normaliza `seleccion.complementos` a un objeto { <idComplemento>: valor }.
+// Admite las dos formas con las que puede llegar desde una conversación:
+//   · objeto  { '<uid|exc:N>': true | false | '<idOpcion>' | '<etiqueta>' }
+//   · array   ['Lavado', 'Peinado M', '<uid>']  → cada entrada se resuelve
+//     contra los complementos y contra las opciones de cada grupo.
+// Toda coincidencia es EXACTA por clave normalizada. Lo que no case se
+// devuelve en `noReconocidos` para poder decirlo, nunca se descarta en
+// silencio ni se aproxima.
+function _normalizarSeleccionComplementos(complementos, comps) {
+  const out = {};
+  const noReconocidos = [];
+
+  // v0.11.3 — "SIN COMPLEMENTOS" TIENE QUE PODER DECIRSE.
+  // Hasta aquí, no contestar y contestar "ninguno" eran indistinguibles: los
+  // dos dejaban los opcionales sin resolver, así que la composición volvía a
+  // pedirlos una y otra vez. Bucle infinito: el usuario decía "tal cual" y la
+  // reserva no se cerraba jamás.
+  // Una lista vacía, o la palabra ninguno/ninguna/nada/no, contestan que NO a
+  // todos los opcionales de golpe. Lo obligatorio sigue sin poder saltarse.
+  const dijoNinguno = (v) => {
+    if (Array.isArray(v)) return v.length === 0;
+    if (typeof v === 'string') {
+      const k = _claveEtiqueta(v);
+      // v0.11.5 — Ampliado: "solo tinte raiz", "adelante", "asi esta bien"…
+      // Con la lista corta, cualquier forma de decir que no quedaba fuera y
+      // la composición volvía a pedir lo mismo: bucle sin salida.
+      const NEGATIVAS = [
+        'ninguno', 'ninguna', 'nada', 'no', 'no gracias', 'ninguno gracias',
+        'sin complementos', 'sin complemento', 'sin nada', 'sin extras',
+        'tal cual', 'asi esta bien', 'asi vale', 'dejalo asi', 'dejalo tal cual',
+        'adelante', 'reserva', 'reservalo', 'resérvalo', 'solo eso', 'solo el servicio',
+        'nada mas', 'nada más', 'ninguna de las dos', 'ninguna opcion'
+      ];
+      if (NEGATIVAS.includes(k)) return true;
+      // "solo <lo que sea>" y "solamente <lo que sea>" = nada más que el
+      // principal. Es como habla la gente: "solo tinte raíz".
+      return /^(solo|solamente|unicamente)\b/.test(k);
+    }
+    return false;
+  };
+
+  if (dijoNinguno(complementos)) {
+    for (const c of comps) {
+      if (c.required) continue;                    // lo obligatorio no se salta
+      out[c.id] = (c.type === 'bool') ? false : 'none';
+    }
+    return { out, noReconocidos };
+  }
+
+  if (!complementos) return { out, noReconocidos };
+
+  const porId = {};
+  const porLabel = {};
+  for (const c of comps) {
+    porId[String(c.id)] = c;
+    const k = _claveEtiqueta(c.label);
+    if (k) porLabel[k] = c;
+  }
+
+  // Array de etiquetas o uids sueltos → se interpretan como "esto va".
+  if (Array.isArray(complementos)) {
+    for (const raw of complementos) {
+      const txt = String(raw == null ? '' : raw).trim();
+      if (!txt) continue;
+      const k = _claveEtiqueta(txt);
+
+      // 1) ¿es el id o la etiqueta de un complemento?
+      const c = porId[txt] || porLabel[k] || null;
+      if (c) {
+        out[c.id] = (c.type === 'bool') ? true : out[c.id];
+        if (c.type !== 'bool' && out[c.id] === undefined) out[c.id] = null; // queda pendiente de opción
+        continue;
+      }
+
+      // 2) ¿es la etiqueta o el id de una OPCIÓN de algún grupo?
+      let encontrado = null;
+      for (const cc of comps) {
+        if (cc.type === 'bool' || !Array.isArray(cc.options)) continue;
+        const o = cc.options.find(op =>
+          String(op.id) === txt || _claveEtiqueta(op.label) === k
+        );
+        if (o) { encontrado = { c: cc, o }; break; }
+      }
+      if (encontrado) { out[encontrado.c.id] = encontrado.o.id; continue; }
+
+      noReconocidos.push(txt);
+    }
+    return { out, noReconocidos };
+  }
+
+  // Objeto { id|etiqueta : valor }
+  if (typeof complementos === 'object') {
+    for (const clave of Object.keys(complementos)) {
+      const c = porId[clave] || porLabel[_claveEtiqueta(clave)] || null;
+      if (!c) { noReconocidos.push(clave); continue; }
+      const v = complementos[clave];
+
+      if (c.type === 'bool') {
+        if (v === true || v === false) { out[c.id] = v; continue; }
+        const kv = _claveEtiqueta(v);
+        if (kv === 'si' || kv === 'true' || kv === '1') out[c.id] = true;
+        else if (kv === 'no' || kv === 'false' || kv === '0' || kv === 'none') out[c.id] = false;
+        else noReconocidos.push(String(clave) + '=' + String(v));
+        continue;
+      }
+
+      // choice / exclusive → id de opción o etiqueta de opción
+      const txt = String(v == null ? '' : v).trim();
+      const kv = _claveEtiqueta(txt);
+      const o = (c.options || []).find(op => String(op.id) === txt || _claveEtiqueta(op.label) === kv);
+      if (o) out[c.id] = o.id;
+      else noReconocidos.push(String(clave) + '=' + txt);
+    }
+  }
+
+  return { out, noReconocidos };
+}
+
+// Lista de lo que falta por decidir. Es el guion de preguntas: cada entrada
+// es una decisión pendiente con sus opciones reales del catálogo.
+function _construirPendiente(svc, comps, variantElegida, compSel) {
+  const pendiente = [];
+
+  if (svc.hasVariants && Array.isArray(svc.variantes) && svc.variantes.length > 0 && variantElegida === null) {
+    pendiente.push({
+      id: 'variante',
+      tipo: 'variante',
+      label: svc.name || 'Servicio',
+      obligatorio: true,
+      opciones: _opcionesVariantePrincipal(svc)
+    });
+  }
+
+  for (const c of comps) {
+    const v = compSel[c.id];
+
+    if (c.type === 'bool') {
+      if (v === true || v === false) continue;
+      pendiente.push({
+        id: c.id,
+        tipo: 'si_no',
+        label: c.label,
+        hint: c.hint || '',
+        obligatorio: !!c.required,
+        price: (c.price == null) ? null : Number(c.price),
+        duration: toNum(c.duration)
+      });
+      continue;
+    }
+
+    // choice / exclusive
+    const resuelto = (typeof v === 'string' && v.length > 0);
+    if (resuelto) continue;
+    // v0.11.3 — Contestado explícitamente que no: no se vuelve a preguntar.
+    if (v === false || v === null) continue;
+    // v0.11.1 — Antes se saltaban los opcionales sin contestar. Eso hacía que
+    // la composición se cerrara sola y AKIRA reservara sin ofrecer nada. En
+    // pantalla, Recepción PRO los ENSEÑA TODOS y decide la persona; aquí
+    // igual: si no se ha contestado, se pregunta.
+    pendiente.push({
+      id: c.id,
+      tipo: (c.type === 'exclusive') ? 'elige_uno' : 'variante_complemento',
+      label: c.label,
+      hint: c.hint || '',
+      obligatorio: !!c.required,
+      opciones: (c.options || []).map(o => ({
+        id: o.id,
+        label: o.label,
+        price: (o.price == null) ? null : Number(o.price),
+        duration: toNum(o.duration)
+      }))
+    });
+  }
+
+  return pendiente;
+}
+
+// Aritmética IDÉNTICA a `_calc()` del bundle v2.0.19. Ni una regla nueva.
+function _calcularTotales(svc, comps, variantElegida, compSel) {
+  let price = 0;
+  let dur = toNum(svc.baseDuration);
+  let unknown = false;
+
+  if (svc.basePrice != null) price += Number(svc.basePrice);
+
+  // La variante SUSTITUYE precio y duración del principal, no los suma.
+  if (variantElegida && variantElegida.idx >= 0) {
+    if (variantElegida.price != null && !isNaN(variantElegida.price)) {
+      price = Number(variantElegida.price);
+      unknown = false;
+    }
+    if (variantElegida.duration > 0) dur = Number(variantElegida.duration);
+  }
+
+  for (const c of comps) {
+    const v = compSel[c.id];
+    if (c.type === 'bool') {
+      if (v === true) {
+        if (c.price == null) unknown = true; else price += Number(c.price);
+        dur += toNum(c.duration);
+      }
+    } else {
+      const o = (c.options || []).find(op => op.id === v) || (c.options || [])[0];
+      if (!o) continue;
+      if (o.price == null) unknown = true; else price += Number(o.price);
+      dur += toNum(o.duration);
+    }
+  }
+
+  const aValorar = unknown || price <= 0;
+  const promoRaw = (aValorar || !svc.promoPct) ? 0 : svc.promoPct;
+  const promoBase = (promoRaw && svc.basePrice != null) ? Number(svc.basePrice) : 0;
+  const ahorro = promoRaw ? Math.round(promoBase * (promoRaw / 100) * 100) / 100 : 0;
+  const promo = (ahorro > 0.005) ? promoRaw : 0;
+  const total = Math.round((price - ahorro) * 100) / 100;
+
+  return { subtotal: price, total, ahorro, promo, duracionMin: dur, aValorar };
+}
+
+// Monta `complementosSetupUid` con el MISMO shape que envía el bundle:
+//   · bool      → el uid suelto (string)
+//   · choice    → { uid: <uid del complemento>, varianteId, varianteLabel, price, duration }
+//   · exclusive → { uid: <uid del servicio elegido>, varianteId, varianteLabel, price, duration }
+function _construirComplementosPayload(comps, compSel) {
+  const acc = [];
+  for (const c of comps) {
+    const v = compSel[c.id];
+    if (c.type === 'bool') {
+      if (v === true) acc.push(c.id);
+      continue;
+    }
+    if (!v || v === 'none') continue;
+    const o = (c.options || []).find(op => op.id === v);
+    if (!o) continue;
+    acc.push({
+      uid: (c.type === 'exclusive') ? o.id : c.id,
+      varianteId: o.id,
+      varianteLabel: o.label || '',
+      price: (o.price == null) ? null : Number(o.price),
+      duration: Number(o.duration) || 0
+    });
+  }
+  return acc;
+}
+
+export const getComposicionServicio = webMethod(
+  Permissions.Anyone,
+  async ({ setupUid, busqueda, seleccion, ambito } = {}) => {
+    const t0 = Date.now();
+    try {
+      const esPublicoAmbito = String(ambito || 'interno').trim().toLowerCase() === 'publico';
+      const usosAmbito = esPublicoAmbito ? USOS_PUBLICOS : USOS_INTERNOS;
+      const nombreAmbito = esPublicoAmbito ? 'publico' : 'interno';
+
+      if (!setupUid && !busqueda) {
+        return { ok: false, version: VERSION, error: { message: 'Indica setupUid o busqueda.' } };
+      }
+
+      // Catálogo completo y filtrado EN CÓDIGO (lección v0.9.4: una fila con
+      // `active` vacío o `uso` con un espacio detrás desaparecía sin rastro).
+      const r = await wixData.query(CMS_CATALOGO)
+        .limit(1000)
+        .find({ suppressAuth: true });
+
+      const todos = r.items || [];
+      const esActivo = (it) => it.active !== false;
+      const enAmbito = (it) => usosAmbito.includes(String(it.uso || '').trim().toLowerCase());
+
+      const activos = todos.filter(esActivo);
+      const ofrecibles = activos.filter(enAmbito);
+
+      // Índice de OFERTA (lo elegible en este ámbito) e índice de FASES
+      // (catálogo activo completo, para resolver los `ref` del mapeoFases al
+      // calcular la duración en cascada). Misma separación que v0.9.8.
+      const porSetupUid = {};
+      for (const it of ofrecibles) if (it.setupUid) porSetupUid[it.setupUid] = it;
+      const porSetupUidFases = {};
+      for (const it of activos) if (it.setupUid) porSetupUidFases[it.setupUid] = it;
+
+      // ── Localizar el servicio ──
+      let fila = null;
+
+      if (setupUid) {
+        fila = porSetupUid[String(setupUid)] || null;
+        if (!fila) {
+          const fuera = porSetupUidFases[String(setupUid)];
+          const msg = fuera
+            ? `"${fuera.label || setupUid}" no es reservable en el ámbito ${nombreAmbito}.`
+            : `Servicio no encontrado: ${setupUid}`;
+          console.warn(`${TAG} ⚠️ getComposicionServicio: ${msg}`);
+          return { ok: false, version: VERSION, error: { message: msg } };
+        }
+      } else {
+        const clave = _claveEtiqueta(busqueda);
+        const principales = ofrecibles.filter(x =>
+          TIPOS_PRINCIPALES.includes(String(x.tipo || '').trim().toLowerCase())
+        );
+        const exactos = principales.filter(x => _claveEtiqueta(x.label) === clave);
+        const parciales = principales.filter(x => _claveEtiqueta(x.label).indexOf(clave) >= 0);
+        const candidatos = exactos.length > 0 ? exactos : parciales;
+
+        const mapaCand = () => candidatos
+          .sort((a, b) => toNum(a.order) - toNum(b.order))
+          .map(x => ({
+            setupUid: x.setupUid || '',
+            label: x.label || '',
+            group: x.group || '',
+            price: toNum(x.price),
+            duration: toNum(x.duration)
+          }));
+
+        if (candidatos.length === 0) {
+          console.log(`${TAG} getComposicionServicio: sin resultados para "${busqueda}" (ámbito ${nombreAmbito}).`);
+          return { ok: true, version: VERSION, estado: 'sin_resultados', busqueda, ambito: nombreAmbito, candidatos: [] };
+        }
+        if (candidatos.length > 1) {
+          console.log(`${TAG} getComposicionServicio: "${busqueda}" es ambiguo (${candidatos.length} candidatos).`);
+          return { ok: true, version: VERSION, estado: 'ambiguo', busqueda, ambito: nombreAmbito, candidatos: mapaCand() };
+        }
+        fila = candidatos[0];
+      }
+
+      // ── Adaptar con el MISMO adaptador del widget ──
+      const svc = adaptarServicio(fila, porSetupUid, porSetupUidFases);
+
+      // Caso A fuera en ámbito interno (ver nota de cabecera).
+      const comps = (svc.complements || []).filter(c => {
+        if (esPublicoAmbito) return true;
+        return !(c.type === 'bool' && c.required === true);
+      });
+
+      const meta = {
+        setupUid: svc.setupUid,
+        label: svc.name,
+        rol: String(fila.tipo || '').trim(),
+        group: fila.group || '',
+        familiaTecnica: fila.family || '',
+        uso: String(fila.uso || '').trim(),
+        minProceso: toNum(fila.minProceso),
+        wixAnclaId: fila.wixAnclaId || '',
+        ambito: nombreAmbito,
+        reservableComoPrincipal: TIPOS_PRINCIPALES.includes(String(fila.tipo || '').trim().toLowerCase()),
+        tieneBono: svc.tieneBono === true
+      };
+
+      // ── Resolver la selección recibida (si la hay) ──
+      const sel = seleccion || null;
+
+      let variantElegida = null;
+      let varianteNoReconocida = null;
+      const opcionesVar = _opcionesVariantePrincipal(svc);
+      const tieneVariantes = svc.hasVariants && Array.isArray(svc.variantes) && svc.variantes.length > 0;
+
+      if (!tieneVariantes) {
+        variantElegida = opcionesVar[0];   // base, y no hay nada que preguntar
+      } else if (sel && (sel.variante !== undefined || sel.varianteIdx !== undefined || sel.varianteId !== undefined)) {
+        const bruto = (sel.varianteIdx !== undefined) ? sel.varianteIdx
+                    : (sel.varianteId !== undefined) ? sel.varianteId
+                    : sel.variante;
+        if (typeof bruto === 'number' && Number.isInteger(bruto)) {
+          variantElegida = opcionesVar.find(o => o.idx === bruto) || null;
+        } else {
+          const txt = String(bruto == null ? '' : bruto).trim();
+          const k = _claveEtiqueta(txt);
+          variantElegida = opcionesVar.find(o => String(o.id) === txt || _claveEtiqueta(o.label) === k) || null;
+        }
+        if (!variantElegida) varianteNoReconocida = String(bruto);
+      }
+
+      const { out: compSel, noReconocidos } = _normalizarSeleccionComplementos(
+        sel ? sel.complementos : null,
+        comps
+      );
+      if (varianteNoReconocida) noReconocidos.push('variante=' + varianteNoReconocida);
+
+      const pendiente = _construirPendiente(svc, comps, variantElegida, compSel);
+
+      // ── SIN selección → composición pura (qué hay que preguntar) ──
+      if (!sel) {
+        console.log(`${TAG} ✅ getComposicionServicio "${svc.name}" (${nombreAmbito}): ${comps.length} complementos, ${pendiente.length} decisiones. ${((Date.now() - t0) / 1000).toFixed(2)}s`);
+        return {
+          ok: true, version: VERSION, estado: 'composicion', ambito: nombreAmbito,
+          servicio: {
+            setupUid: svc.setupUid,
+            label: svc.name,
+            descripcion: svc.description || '',
+            basePrice: svc.basePrice,
+            baseDuration: toNum(svc.baseDuration),
+            promoPct: toNum(svc.promoPct),
+            hasVariants: !!tieneVariantes,
+            variantes: opcionesVar,
+            complementos: comps,
+            idStaffPermitidos: Array.isArray(svc.idStaff) ? svc.idStaff : []
+          },
+          meta,
+          pendiente
+        };
+      }
+
+      // ── CON selección incompleta → decir qué falta, sin adivinar ──
+      // v0.11.1 — Bloquea CUALQUIER decisión sin contestar, no solo las
+      // obligatorias. Un complemento opcional no contestado no es un "no":
+      // es una pregunta que nadie ha hecho todavía.
+      if (pendiente.length > 0 || noReconocidos.length > 0) {
+
+        // v0.11.2 — Lo obligatorio se devuelve entero, con sus opciones y
+        // precios: hay que preguntarlo sí o sí. Lo OPCIONAL va solo con el
+        // nombre. Volcar la tabla completa de complementos con precios y
+        // duraciones cada vez alarga la conversación y la vuelve engorrosa;
+        // una recepcionista dice "¿le añadimos algo?" y solo detalla si le
+        // preguntan. El detalle sigue disponible: se pide la composición otra
+        // vez nombrando el complemento.
+        const obligatorios = pendiente.filter(p => p.obligatorio);
+        const detalleOpcionales = pendiente.filter(p => !p.obligatorio);
+        const opcionales = detalleOpcionales.map(p => p.label);
+
+        // v0.11.4 — Se dice EXPLÍCITAMENTE si hay algo que no se pueda
+        // saltar. Antes había que deducirlo de una lista, y se acabó
+        // contando al usuario que el sistema exigía elegir complementos
+        // cuando ninguno era obligatorio.
+        console.log(`${TAG} getComposicionServicio "${svc.name}": ${obligatorios.length} obligatoria(s), ${detalleOpcionales.length} opcional(es), ${noReconocidos.length} no reconocido(s).`);
+
+        return {
+          ok: true, version: VERSION, estado: 'faltan_datos', ambito: nombreAmbito,
+          servicio: { setupUid: svc.setupUid, label: svc.name },
+          meta,
+          hayObligatorios: obligatorios.length > 0,
+          sePuedeOmitirTodo: obligatorios.length === 0,
+          comoOmitir: obligatorios.length === 0
+            ? 'Ninguna de estas decisiones es obligatoria. Para reservar sin ninguna, vuelve a llamar con complementos: "ninguno".'
+            : 'Hay decisiones que no se pueden omitir; el resto sí.',
+          pendiente: obligatorios,
+          opcionales,
+          detalleOpcionales,
+          noReconocidos
+        };
+      }
+
+      // ── Selección completa → totales + payload listo para reservar ──
+      const totales = _calcularTotales(svc, comps, variantElegida, compSel);
+      const complementosSetupUid = _construirComplementosPayload(comps, compSel);
+
+      const varianteSel = (variantElegida && variantElegida.idx >= 0)
+        ? {
+            idx: variantElegida.idx,
+            label: variantElegida.label,
+            price: (variantElegida.price == null) ? 0 : Number(variantElegida.price),
+            duration: Number(variantElegida.duration) || 0
+          }
+        : null;
+
+      const elegido = {
+        variante: variantElegida ? { id: variantElegida.id, label: variantElegida.label } : null,
+        complementos: comps
+          .filter(c => {
+            const v = compSel[c.id];
+            return (c.type === 'bool') ? v === true : (!!v && v !== 'none');
+          })
+          .map(c => {
+            const v = compSel[c.id];
+            if (c.type === 'bool') {
+              return { label: c.label, opcion: '', price: (c.price == null) ? null : Number(c.price), duration: toNum(c.duration) };
+            }
+            const o = (c.options || []).find(op => op.id === v);
+            return { label: c.label, opcion: (o && o.label) || '', price: (o && o.price != null) ? Number(o.price) : null, duration: (o ? toNum(o.duration) : 0) };
+          })
+      };
+
+      console.log(`${TAG} ✅ getComposicionServicio RESUELTO "${svc.name}" (${nombreAmbito}): ${totales.duracionMin}min · ${totales.total}€ · ${complementosSetupUid.length} complemento(s). ${((Date.now() - t0) / 1000).toFixed(2)}s`);
+
+      return {
+        ok: true, version: VERSION, estado: 'resuelto', ambito: nombreAmbito,
+        servicio: { setupUid: svc.setupUid, label: svc.name },
+        meta,
+        elegido,
+        totales,
+        // Listo para getHuecosDisponibles y para crearReservaPublica /
+        // crearPackReserva. Mismos nombres de campo que envía el bundle,
+        // para que el consumidor no tenga que traducir nada.
+        payload: {
+          principalSetupUid: svc.setupUid,
+          complementosSetupUid,
+          varianteSel,
+          durationMin: totales.duracionMin,
+          idStaffPermitidos: Array.isArray(svc.idStaff) ? svc.idStaff : []
+        }
+      };
+
+    } catch (e) {
+      console.error(`${TAG} ❌ getComposicionServicio:`, e.message);
+      return { ok: false, version: VERSION, error: safeErr(e) };
+    }
+  }
+);
+
+// =====================================================
+// 7 · GET CONSTANTS (diagnóstico)
+// =====================================================
+export const getConstants = webMethod(
+  Permissions.Anyone,
+  async () => ({
+    ok: true,
+    version: VERSION,
+    collections: { CMS_CATALOGO, CMS_CATEGORIAS, CMS_STAFF, CMS_CONFIG },
+    filtros: { USOS_PUBLICOS, TIPOS_PRINCIPALES }
+  })
+);
