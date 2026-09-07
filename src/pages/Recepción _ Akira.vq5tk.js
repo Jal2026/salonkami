@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * KAMISUITE — AKIRA · Page Code
  * Página:   AKIRA (Consultor)
- * VERSION:  1.12.0
+ * VERSION:  1.13.0
  * FECHA:    15 Agosto 2026
  *
  * CAMBIOS v1.7.0 → v1.8.0 — SALUDO DESDE EL CMS.
@@ -112,7 +112,7 @@ const MODO = 'asesor';
 // hardcoding). Este flag solo enciende o apaga la funcionalidad.
 const TTS_ENABLED = true;
 
-const V = 'AKIRA Page v1.12.0';
+const V = 'AKIRA Page v1.13.0';
 
 // Bola flotante del chat IA nativo de Wix. Se oculta en la página de AKIRA:
 // no queremos dos asistentes compitiendo en pantalla.
@@ -277,7 +277,10 @@ $w.onReady(async function () {
           const r = result && result.resumen;
           const texto = (result && result.ok)
             ? (r
-                ? `[HECHO. La acción se ejecutó y quedó guardada: ${[r.servicio, r.cliente, r.profesional, [r.fecha, r.hora].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}. No queda nada pendiente de esta petición: no vuelvas a proponerla ni a preguntar por ella.]`
+                // v1.13.0 — Se anota también el identificador de lo escrito.
+                // Sin él, "añade un secado a la cita que acabas de crear" no
+                // tenía a qué agarrarse y había que volver a buscarla a mano.
+                ? `[HECHO. La acción se ejecutó y quedó guardada: ${[r.servicio, r.cliente, r.profesional, [r.fecha, r.hora].filter(Boolean).join(' ')].filter(Boolean).join(' · ')}.${result.referencia ? ` Identificador de la cita afectada: ${result.referencia}; úsalo como reservaId si la persona se refiere a "esa cita" o "la que acabas de crear".` : ''} No queda nada pendiente de esta petición: no vuelvas a proponerla ni a preguntar por ella.]`
                 : '[HECHO. La acción se ejecutó y quedó guardada. No queda nada pendiente: no vuelvas a proponerla.]')
             : `No se ha podido completar: ${(result && result.error && result.error.message) || 'error desconocido'}.`;
           await akiraAnotarAccion({
