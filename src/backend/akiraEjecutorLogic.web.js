@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * KAMISUITE — AKIRA · Intérprete de capacidades (Wix Velo)
  * Archivo:  backend/akiraEjecutorLogic.web.js
- * VERSION:  3.2.0
+ * VERSION:  3.3.0
  * FECHA:    6 Septiembre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
@@ -161,7 +161,7 @@ import {
 
 import { cargarTodosContactos } from 'backend/recepcionLogic.web';
 
-const VERSION = '3.2.0';
+const VERSION = '3.3.0';
 const TAG = `[AkiraEjecutor][${VERSION}]`;
 
 const CMS_CAPABILITIES = 'AkiraCapabilities';
@@ -353,8 +353,32 @@ function verboBusca(paso, ctx) {
       cand = lista.filter(x => String(porRuta(x, campo) || '') === txt);
     } else {
       if (esEmail || t9) continue;
+      // v3.3.0 — TRES PASADAS. Exacta, subcadena y, si nada casó, todas las
+      // palabras presentes en cualquier orden.
+      //
+      // Sin la tercera, "Tratamiento Hair Times" no encontraba "Tratamiento
+      // HairTimes Selection_complemento" —por el espacio de Hair Times— y la
+      // única salida era pedirle a la persona el nombre exacto del catálogo,
+      // que es justo lo que no tiene por qué saberse. Es recall, no negocio:
+      // solo entra cuando las dos primeras pasadas vuelven vacías, y si
+      // encuentra varias devuelve `ambiguo` como siempre.
       const ex = lista.filter(x => clave(porRuta(x, campo)) === k);
-      cand = ex.length ? ex : lista.filter(x => clave(porRuta(x, campo)).indexOf(k) >= 0);
+      if (ex.length) {
+        cand = ex;
+      } else {
+        const sub = lista.filter(x => clave(porRuta(x, campo)).indexOf(k) >= 0);
+        if (sub.length) {
+          cand = sub;
+        } else {
+          const palabras = k.split(' ').filter(t => t.length > 1);
+          cand = palabras.length
+            ? lista.filter(x => {
+                const v = clave(porRuta(x, campo));
+                return palabras.every(t => v.indexOf(t) >= 0);
+              })
+            : [];
+        }
+      }
     }
     if (cand.length) break;
   }
