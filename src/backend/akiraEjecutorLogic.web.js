@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * KAMISUITE — AKIRA · Intérprete de capacidades (Wix Velo)
  * Archivo:  backend/akiraEjecutorLogic.web.js
- * VERSION:  3.6.0
+ * VERSION:  3.7.0
  * FECHA:    6 Septiembre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
@@ -163,7 +163,7 @@ import {
 
 import { cargarTodosContactos } from 'backend/recepcionLogic.web';
 
-const VERSION = '3.6.0';
+const VERSION = '3.7.0';
 const TAG = `[AkiraEjecutor][${VERSION}]`;
 
 const CMS_CAPABILITIES = 'AkiraCapabilities';
@@ -348,7 +348,20 @@ async function verboLlama(paso, ctx) {
 // Búsqueda determinista en una lista. Nunca elige por aproximación: si hay
 // varios, devuelve candidatos para que se pregunte.
 function verboBusca(paso, ctx) {
-  const lista = resolver(paso.en, ctx);
+  let lista = resolver(paso.en, ctx);
+
+  // v3.7.0 — `filtro`: condición que cada elemento debe cumplir para entrar en
+  // la búsqueda. Se evalúa con `$item` apuntando al elemento, igual que en
+  // `elige`. Sin esto, la agenda del día devolvía también las citas
+  // CANCELADAS y se ofrecían para mover o cobrar: la fila no tenía forma de
+  // decir "estas no". La condición la declara la fila; aquí no se sabe qué
+  // es un estado ni cuál importa.
+  if (paso.filtro && Array.isArray(lista)) {
+    const anterior = ctx.item;
+    lista = lista.filter(x => { ctx.item = x; return cumpleCondicion(paso.filtro, ctx); });
+    ctx.item = anterior;
+  }
+
   const valorBruto = resolver(paso.valor, ctx);
   const txt = String(valorBruto == null ? '' : valorBruto).trim();
 
