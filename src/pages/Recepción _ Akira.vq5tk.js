@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * KAMISUITE — AKIRA · Page Code
  * Página:   AKIRA (Consultor)
- * VERSION:  1.11.0
+ * VERSION:  1.12.0
  * FECHA:    15 Agosto 2026
  *
  * CAMBIOS v1.7.0 → v1.8.0 — SALUDO DESDE EL CMS.
@@ -112,7 +112,7 @@ const MODO = 'asesor';
 // hardcoding). Este flag solo enciende o apaga la funcionalidad.
 const TTS_ENABLED = true;
 
-const V = 'AKIRA Page v1.11.0';
+const V = 'AKIRA Page v1.12.0';
 
 // Bola flotante del chat IA nativo de Wix. Se oculta en la página de AKIRA:
 // no queremos dos asistentes compitiendo en pantalla.
@@ -197,7 +197,13 @@ $w.onReady(async function () {
           // v1.11.0 — El plano con el que nació la conversación, para que el
           // chip vuelva a su sitio al reabrirla (patrón CENTRI). `null` en
           // sesiones anteriores al campo: el widget deja el chip como está.
-          modo: result.modo || null
+          modo: result.modo || null,
+          // v1.12.0 — Tarjeta de confirmación pendiente. Viajaba solo en la
+          // respuesta HTTP, así que un corte del gateway a los 14s la perdía
+          // y el hilo se quedaba mudo: el turno del asistente es la nota
+          // entre corchetes y el widget la descarta. Ahora sale de la sesión
+          // y se repinta al recuperar el historial. `null` = nada pendiente.
+          propuesta: result.propuesta || null
         }));
       } else {
         console.warn(`[${V}] akiraAbrirChat ERR: ${result.error}`);
