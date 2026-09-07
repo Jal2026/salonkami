@@ -18,6 +18,25 @@
 //   prepararse jamás. Ahora una lista vacía o la palabra ninguno/nada/no/tal
 //   cual contestan que no a todos los opcionales de una vez.
 //
+// v0.11.7 — LA LISTA ES LA RESPUESTA COMPLETA.
+//   Una selección parcial no tenía forma de cerrarse. Contestar "Corte Mujer"
+//   a "¿alguno o ninguno?" marcaba ese complemento y dejaba los otros cuatro
+//   sin contestar, así que la composición volvía a preguntar por ellos. Con
+//   cinco opcionales eso son cinco rondas, y no había manera de decir "este y
+//   nada más": la lista vacía significa NINGUNO, no "ninguno más".
+//
+//   Regla nueva, y es la que se corresponde con cómo habla una persona:
+//   SI EL PARÁMETRO LLEGA, ES LA RESPUESTA ENTERA. Lo que no se nombra, no se
+//   quiere. Ausente sigue siendo "todavía sin preguntar"; presente cierra
+//   todos los opcionales de una vez. La lista vacía deja de ser un caso
+//   especial: es el caso general con cero elementos.
+//
+//   Lo OBLIGATORIO no se toca: sigue quedando pendiente si no se contesta,
+//   exactamente igual que antes. No se puede saltar un Planchado de Botox por
+//   omisión.
+//
+//   Sin efecto fuera de AKIRA: getComposicionServicio es el único consumidor.
+//
 // v0.11.6 — FUERA LA LISTA DE SINÓNIMOS. UNA SOLA FORMA DE DECIR QUE NO.
 //   v0.11.5 llevaba dentro una lista de formas de decir "ninguno" ("tal cual",
 //   "adelante", "solo…", "así está bien"). Eso es comportamiento escrito en
@@ -879,7 +898,7 @@
 import { Permissions, webMethod } from 'wix-web-module';
 import wixData from 'wix-data';
 
-const VERSION = '0.11.6';
+const VERSION = '0.11.7';
 const TAG = `[WidgetPublico][${VERSION}]`;
 
 // v0.10.0 — Prefijo de ordenación del nombre del personal.
@@ -3164,7 +3183,19 @@ function _normalizarSeleccionComplementos(complementos, comps) {
     return { out, noReconocidos };
   }
 
+  // AUSENTE = todavía sin preguntar. Es lo que mantiene la composición abierta
+  // y hace que se devuelvan los complementos para ofrecerlos.
   if (!complementos) return { out, noReconocidos };
+
+  // v0.11.7 — Presente = respuesta completa. Se cierran ahora todos los
+  // opcionales; los nombrados los sobrescriben más abajo. Sin esto, nombrar
+  // uno dejaba los demás abiertos y la composición volvía a preguntar.
+  const cerrarNoNombrados = () => {
+    for (const c of comps) {
+      if (c.required) continue;
+      if (out[c.id] === undefined) out[c.id] = (c.type === 'bool') ? false : 'none';
+    }
+  };
 
   const porId = {};
   const porLabel = {};
@@ -3202,6 +3233,7 @@ function _normalizarSeleccionComplementos(complementos, comps) {
 
       noReconocidos.push(txt);
     }
+    cerrarNoNombrados();
     return { out, noReconocidos };
   }
 
@@ -3228,6 +3260,7 @@ function _normalizarSeleccionComplementos(complementos, comps) {
       if (o) out[c.id] = o.id;
       else noReconocidos.push(String(clave) + '=' + txt);
     }
+    cerrarNoNombrados();
   }
 
   return { out, noReconocidos };
@@ -3269,7 +3302,14 @@ function _construirPendiente(svc, comps, variantElegida, compSel) {
     const resuelto = (typeof v === 'string' && v.length > 0);
     if (resuelto) continue;
     // v0.11.3 — Contestado explícitamente que no: no se vuelve a preguntar.
-    if (v === false || v === null) continue;
+    // El "no" de un grupo de opciones es la cadena 'none', que ya ha salido
+    // por `resuelto`; aquí solo queda el `false` de los de sí/no.
+    // v0.11.7 — `null` YA NO cierra. Es lo que se guarda cuando se nombra el
+    // grupo sin decir la opción ("Peinado" en vez de "Peinado Medio"), y el
+    // comentario de ese punto dice que queda PENDIENTE DE OPCIÓN. Cerrarlo
+    // aquí hacía justo lo contrario: se pedía el complemento y se descartaba
+    // en silencio.
+    if (v === false) continue;
     // v0.11.1 — Antes se saltaban los opcionales sin contestar. Eso hacía que
     // la composición se cerrara sola y AKIRA reservara sin ofrecer nada. En
     // pantalla, Recepción PRO los ENSEÑA TODOS y decide la persona; aquí
