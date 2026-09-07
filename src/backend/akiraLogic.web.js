@@ -1,8 +1,41 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * KAMISUITE — AKIRA Backend (Wix Velo)
  * Archivo:  backend/akiraLogic.web.js
- * VERSION:  1.17.0
+ * VERSION:  1.18.0
  * FECHA:    7 Septiembre 2026
+ *
+ * ───────────────────────────────────────────────────────────────────────────
+ * CAMBIOS v1.17.0 → v1.18.0 — LA TARJETA SOBREVIVE AL 504
+ * ───────────────────────────────────────────────────────────────────────────
+ *
+ *   Medido en producción (7 sep, 13:15): dos preparaciones `listo` seguidas
+ *   dentro de la MISMA pregunta y el gateway cortando a los 14s. La red de
+ *   polling rescata el TEXTO —está en AkiraMessages— pero la propuesta viajaba
+ *   solo en la respuesta HTTP. Al cortarse, la tarjeta no existía en ninguna
+ *   parte: el usuario se quedaba mirando un hilo donde el turno del asistente
+ *   es la nota entre corchetes, que el widget descarta. De ahí los silencios.
+ *
+ *   DOS CAMBIOS:
+ *
+ *   1) LA PROPUESTA SE GUARDA EN LA SESIÓN. `propuestaPendiente` (Texto) en
+ *      AkiraSessions, con lo justo para repintar la tarjeta: acción,
+ *      parámetros, resumen y aviso. El `payload` NO se guarda: son
+ *      identificadores internos y, además, `ejecutarAccion` vuelve a preparar
+ *      desde cero al confirmar, así que no hace falta. `akiraAbrirChat` la
+ *      devuelve, y de ahí el page code y el widget la repintan igual que el
+ *      chip del plano (patrón CENTRI).
+ *      Se BORRA en cuanto un turno posterior no produce propuesta y en cuanto
+ *      `akiraAnotarAccion` deja constancia de lo ejecutado: una tarjeta que
+ *      reaparece después de haber confirmado crearía la cita dos veces.
+ *
+ *   2) UNA MISMA ACCIÓN NO SE PREPARA DOS VECES EN EL MISMO TURNO. El bucle
+ *      memoriza por acción + parámetros. La segunda llamada idéntica devuelve
+ *      lo ya calculado en vez de recargar los 158 contactos, el equipo y la
+ *      agenda otra vez. Eran ~2,5s regalados por turno, que es buena parte de
+ *      lo que separa una respuesta de un 504. No cambia lo que ve el modelo.
+ *
+ *   ⛔ REQUIERE el campo `propuestaPendiente` (Texto) en AkiraSessions.
+ *      Escribir a un campo inexistente NO falla: wixData ignora la clave.
  *
  * ───────────────────────────────────────────────────────────────────────────
  * CAMBIOS v1.16.0 → v1.17.0 — LA PREGUNTA DE AKIRA VUELVE AL HISTORIAL
@@ -712,7 +745,7 @@ import { cargarTodosContactos } from 'backend/recepcionLogic.web';
 // La ESCRITURA no está aquí: vive en ejecutarAccion, que llama el page code.
 import { listarAccionesCore, prepararAccionCore } from 'backend/akiraEjecutorLogic.web';
 
-const VERSION = '1.17.0';
+const VERSION = '1.18.0';
 const TAG = `[AkiraLogic][${VERSION}]`;
 const AUTH = { suppressAuth: true };
 
@@ -1991,6 +2024,10 @@ async function _callClaudeConHerramientas(model, apiKey, systemBlocks, messages,
   // v1.15.0 — Última acción llamada que se quedó a medias (faltan datos,
   // colisión, ambigüedad…). Nada de esto ha tocado el salón.
   let accionIncompleta = null;
+  // v1.18.0 — Misma acción, mismos parámetros, una sola preparación por
+  // pregunta. Preparar recarga contactos, equipo y agenda: repetirlo dentro
+  // del mismo turno son segundos regalados contra el techo de 14s.
+  const prepCache = new Map();
 
   for (let vuelta = 0; vuelta < 4; vuelta++) {
     const payload = {
@@ -2037,7 +2074,14 @@ async function _callClaudeConHerramientas(model, apiKey, systemBlocks, messages,
           // la petición contra catálogo, CRM, personal y agenda, y devuelve
           // qué falta, qué choca, o la propuesta cerrada. Nada se escribe
           // aquí: la escritura la dispara el page code tras confirmación.
-          const prep = await prepararAccionCore({ accion: tu.name, params: tu.input || {} });
+          const clavePrep = tu.name + '|' + JSON.stringify(tu.input || {});
+          let prep = prepCache.get(clavePrep);
+          if (prep) {
+            console.log(`${TAG} ${tu.name}: preparación repetida en el mismo turno, se reutiliza.`);
+          } else {
+            prep = await prepararAccionCore({ accion: tu.name, params: tu.input || {} });
+            prepCache.set(clavePrep, prep);
+          }
           if (prep && prep.estado === 'listo') {
             propuesta = { accion: tu.name, params: tu.input || {}, ...prep };
           } else {
@@ -2711,7 +2755,7 @@ async function _getHistorial(sessionId) {
  * Guarda el turno. READ-MERGE-UPDATE obligatorio en la sesión:
  * wixData.update REEMPLAZA el documento entero (Conceptos Fundacionales).
  */
-async function _guardarMensajes(sessionId, query, respuesta, notaSistema) {
+async function _guardarMensajes(sessionId, query, respuesta, notaSistema, propuestaPendiente) {
   const res = await wixData.query(C_MESSAGES)
     .eq('sessionRef', sessionId)
     .descending('orden')
@@ -2742,6 +2786,9 @@ async function _guardarMensajes(sessionId, query, respuesta, notaSistema) {
       const merged = { ...sesion };
       merged.fechaActualizacion = now;
       merged.messageCount = (Number(sesion.messageCount) || 0) + (notaSistema ? 3 : 2);
+      // v1.18.0 — La tarjeta pendiente vive en la sesión, no solo en la
+      // respuesta HTTP. `undefined` = no tocar; '' = borrarla.
+      if (propuestaPendiente !== undefined) merged.propuestaPendiente = propuestaPendiente;
       await wixData.update(C_SESSIONS, merged, AUTH);
     }
   } catch (e) {
@@ -2767,10 +2814,15 @@ export const akiraAnotarAccion = webMethod(
       if (!sessionId || !textoResultado) {
         return { ok: false, version: VERSION, error: 'Faltan sessionId o texto.' };
       }
+      // v1.18.0 — La acción ya se ejecutó (o se intentó): la tarjeta deja de
+      // estar pendiente. Si no se borrase, reaparecería al reabrir el chat y
+      // confirmar dos veces crearía la cita dos veces.
       await _guardarMensajes(
         String(sessionId),
         String(textoUsuario || 'Confirmar'),
-        String(textoResultado)
+        String(textoResultado),
+        undefined,
+        ''
       );
       console.log(`${TAG} akiraAnotarAccion: anotada en sesión ${sessionId}`);
       return { ok: true, version: VERSION };
@@ -2977,7 +3029,19 @@ export async function askAkiraCore({ sessionId, query, userId, userName, modo })
       textoHistorial = respuesta;
     }
 
-    await _guardarMensajes(effectiveSessionId, String(query), textoHistorial, notaSistema);
+    // v1.18.0 — Lo justo para repintar la tarjeta si la conexión se corta.
+    // Sin `payload`: son identificadores internos y ejecutarAccion vuelve a
+    // preparar desde cero al confirmar.
+    const propuestaGuardada = propuesta
+      ? JSON.stringify({
+          accion: propuesta.accion,
+          params: propuesta.params || {},
+          resumen: propuesta.resumen || null,
+          aviso: propuesta.aviso || null
+        })
+      : '';
+
+    await _guardarMensajes(effectiveSessionId, String(query), textoHistorial, notaSistema, propuestaGuardada);
 
     const totalMs = Date.now() - tIn;
     _log({ query, respuesta, modo, modeloUsado, consultas, prepMs, apiMs, totalMs, cacheStats });
@@ -3152,7 +3216,18 @@ export const akiraAbrirChat = webMethod(
         const ses = await wixData.get(C_SESSIONS, sessionId, AUTH);
         modo = (ses && ses.modo) ? String(ses.modo) : null;
       } catch (_) { /* sesión borrada o sin campo: se devuelve null */ }
-      return { ok: true, sessionId, mensajes, modo };
+
+      // v1.18.0 — Tarjeta pendiente de confirmar. Se lee de la misma fila que
+      // el plano. Si el campo no existe o está vacío, va null y el widget no
+      // pinta nada, igual que hasta ahora.
+      let propuesta = null;
+      try {
+        const ses2 = await wixData.get(C_SESSIONS, sessionId, AUTH);
+        const crudo = ses2 && ses2.propuestaPendiente;
+        if (crudo) propuesta = (typeof crudo === 'string') ? JSON.parse(crudo) : crudo;
+      } catch (_) { /* sin campo, vacío o JSON roto: sin tarjeta */ }
+
+      return { ok: true, sessionId, mensajes, modo, propuesta };
     } catch (e) {
       console.error(`${TAG} akiraAbrirChat EXCEPTION:`, e);
       return { ok: false, error: e.message };
