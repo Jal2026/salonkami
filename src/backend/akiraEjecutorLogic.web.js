@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * KAMISUITE — AKIRA · Intérprete de capacidades (Wix Velo)
  * Archivo:  backend/akiraEjecutorLogic.web.js
- * VERSION:  3.4.0
+ * VERSION:  3.5.0
  * FECHA:    6 Septiembre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
@@ -24,7 +24,9 @@
  * QUÉ HAY EN CÓDIGO Y POR QUÉ NO PUEDE SALIR
  * ───────────────────────────────────────────────────────────────────────────
  *
- * 1. VERBOS. Cuatro operaciones genéricas: llamar, buscar, comprobar, elegir.
+ * 1. VERBOS. Cinco operaciones genéricas: llamar, buscar, comprobar, elegir
+ *    y calcular (v3.5.0: sumar y restar, para poder enseñar cómo queda una
+ *    cita después de añadirle algo).
  *    Ninguna sabe nada de peluquería. Son el vocabulario con el que se
  *    escriben los pasos.
  * 2. LISTA BLANCA. Qué funciones de producción se pueden invocar. Abrir una
@@ -161,7 +163,7 @@ import {
 
 import { cargarTodosContactos } from 'backend/recepcionLogic.web';
 
-const VERSION = '3.4.0';
+const VERSION = '3.5.0';
 const TAG = `[AkiraEjecutor][${VERSION}]`;
 
 const CMS_CAPABILITIES = 'AkiraCapabilities';
@@ -410,6 +412,39 @@ function verboBusca(paso, ctx) {
   return { estado: 'ok', item: cand[0], candidatos: cand, total: 1, buscado: txt };
 }
 
+/**
+ * VERBO calcula (v3.5.0) — aritmética y nada más.
+ *
+ *   { "verbo":"calcula", "id":"total", "suma":[ <ref>, <ref>, ... ] }
+ *   { "verbo":"calcula", "id":"resto", "resta":[ <ref>, <ref> ] }
+ *
+ * Resultado: { valor: <número> }.
+ *
+ * Existe porque una tarjeta de confirmación tiene que poder decir cómo queda
+ * la cita ENTERA al añadirle algo —duración y precio resultantes—, y hasta
+ * aquí el intérprete no sabía sumar: solo podía enseñar el antes o el añadido,
+ * nunca el después. Sumar no es negocio: no sabe qué son esos números.
+ *
+ * Lo que no sea número cuenta como 0, para que un campo vacío no convierta el
+ * total en NaN y acabe pintado en pantalla.
+ */
+function verboCalcula(paso, ctx) {
+  const num = (v) => {
+    const n = Number(resolver(v, ctx));
+    return Number.isFinite(n) ? n : 0;
+  };
+  if (Array.isArray(paso.suma)) {
+    const valor = paso.suma.reduce((a, v) => a + num(v), 0);
+    return { valor: Math.round(valor * 100) / 100 };
+  }
+  if (Array.isArray(paso.resta) && paso.resta.length) {
+    const [primero, ...resto] = paso.resta;
+    const valor = resto.reduce((a, v) => a - num(v), num(primero));
+    return { valor: Math.round(valor * 100) / 100 };
+  }
+  return { valor: 0 };
+}
+
 function verboComprueba(paso, ctx) {
   const v = resolver(paso.que, ctx);
   if (paso.contiene !== undefined) {
@@ -464,6 +499,7 @@ async function ejecutarSecuencia(pasos, params) {
     else if (verbo === 'busca')     res = verboBusca(paso, ctx);
     else if (verbo === 'comprueba') res = verboComprueba(paso, ctx);
     else if (verbo === 'elige')     res = await verboElige(paso, ctx);
+    else if (verbo === 'calcula')   res = verboCalcula(paso, ctx);
     else return { estado: 'error', mensaje: `Verbo desconocido en la secuencia: "${verbo}".` };
 
     if (paso.id) ctx.pasos[paso.id] = res;
