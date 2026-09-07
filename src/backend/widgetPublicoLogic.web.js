@@ -18,6 +18,22 @@
 //   prepararse jamás. Ahora una lista vacía o la palabra ninguno/nada/no/tal
 //   cual contestan que no a todos los opcionales de una vez.
 //
+// v0.11.6 — FUERA LA LISTA DE SINÓNIMOS. UNA SOLA FORMA DE DECIR QUE NO.
+//   v0.11.5 llevaba dentro una lista de formas de decir "ninguno" ("tal cual",
+//   "adelante", "solo…", "así está bien"). Eso es comportamiento escrito en
+//   código: cada manera nueva de decir que no obligaba a publicar el backend,
+//   y entender lo que dice una persona es trabajo del modelo, no de esta
+//   función. Quedan las dos formas inequívocas: la palabra "ninguno" y la
+//   LISTA VACÍA. La fila de AkiraCapabilities declara cuál usar.
+//
+//   Y el aviso `comoOmitir` decía "vuelve a llamar con complementos:
+//   \"ninguno\"" — una cadena — mientras el parámetro se declara como lista.
+//   Se le estaba pidiendo al modelo justo lo que su esquema le prohíbe. Ahora
+//   dice lista vacía.
+//
+//   Sin efecto fuera de AKIRA: `_normalizarSeleccionComplementos` solo la usa
+//   getComposicionServicio, y el bundle público no la consume.
+//
 // v0.11.2 — LO OPCIONAL SE OFRECE, NO SE RECITA.
 //   Se devolvían todos los complementos con precios y duraciones, y la
 //   conversación se convertía en una tabla. Ahora lo obligatorio va entero y
@@ -863,7 +879,7 @@
 import { Permissions, webMethod } from 'wix-web-module';
 import wixData from 'wix-data';
 
-const VERSION = '0.11.5';
+const VERSION = '0.11.6';
 const TAG = `[WidgetPublico][${VERSION}]`;
 
 // v0.10.0 — Prefijo de ordenación del nombre del personal.
@@ -3122,29 +3138,21 @@ function _normalizarSeleccionComplementos(complementos, comps) {
   // v0.11.3 — "SIN COMPLEMENTOS" TIENE QUE PODER DECIRSE.
   // Hasta aquí, no contestar y contestar "ninguno" eran indistinguibles: los
   // dos dejaban los opcionales sin resolver, así que la composición volvía a
-  // pedirlos una y otra vez. Bucle infinito: el usuario decía "tal cual" y la
-  // reserva no se cerraba jamás.
-  // Una lista vacía, o la palabra ninguno/ninguna/nada/no, contestan que NO a
-  // todos los opcionales de golpe. Lo obligatorio sigue sin poder saltarse.
+  // pedirlos una y otra vez. Bucle infinito.
+  //
+  // v0.11.6 — DOS FORMAS, NI UNA MÁS. La lista de sinónimos que había aquí
+  // ("tal cual", "adelante", "solo…", "así está bien") era comportamiento en
+  // código: cada forma nueva de decir que no habría obligado a publicar el
+  // backend. Interpretar el lenguaje es del modelo. Aquí solo se reconoce lo
+  // inequívoco: la LISTA VACÍA y la palabra "ninguno".
+  //
+  // Lo que NO se toca: omitir el parámetro sigue significando "todavía sin
+  // preguntar", y por eso la composición sigue abierta y se devuelven los
+  // complementos para ofrecerlos. Distinguir esas dos cosas es lo que impide
+  // que la cita se cierre sin haber preguntado nada.
   const dijoNinguno = (v) => {
     if (Array.isArray(v)) return v.length === 0;
-    if (typeof v === 'string') {
-      const k = _claveEtiqueta(v);
-      // v0.11.5 — Ampliado: "solo tinte raiz", "adelante", "asi esta bien"…
-      // Con la lista corta, cualquier forma de decir que no quedaba fuera y
-      // la composición volvía a pedir lo mismo: bucle sin salida.
-      const NEGATIVAS = [
-        'ninguno', 'ninguna', 'nada', 'no', 'no gracias', 'ninguno gracias',
-        'sin complementos', 'sin complemento', 'sin nada', 'sin extras',
-        'tal cual', 'asi esta bien', 'asi vale', 'dejalo asi', 'dejalo tal cual',
-        'adelante', 'reserva', 'reservalo', 'resérvalo', 'solo eso', 'solo el servicio',
-        'nada mas', 'nada más', 'ninguna de las dos', 'ninguna opcion'
-      ];
-      if (NEGATIVAS.includes(k)) return true;
-      // "solo <lo que sea>" y "solamente <lo que sea>" = nada más que el
-      // principal. Es como habla la gente: "solo tinte raíz".
-      return /^(solo|solamente|unicamente)\b/.test(k);
-    }
+    if (typeof v === 'string') return _claveEtiqueta(v) === 'ninguno';
     return false;
   };
 
@@ -3536,8 +3544,8 @@ export const getComposicionServicio = webMethod(
           hayObligatorios: obligatorios.length > 0,
           sePuedeOmitirTodo: obligatorios.length === 0,
           comoOmitir: obligatorios.length === 0
-            ? 'Ninguna de estas decisiones es obligatoria. Para reservar sin ninguna, vuelve a llamar con complementos: "ninguno".'
-            : 'Hay decisiones que no se pueden omitir; el resto sí.',
+            ? 'Ninguna de estas decisiones es obligatoria. Ofrécelas primero; si la persona no quiere ninguna, vuelve a llamar con complementos como lista vacía.'
+            : 'Hay decisiones que no se pueden omitir; el resto sí. Ofrece las opcionales antes de cerrar.',
           pendiente: obligatorios,
           opcionales,
           detalleOpcionales,
