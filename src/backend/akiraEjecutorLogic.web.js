@@ -1,7 +1,7 @@
 /* ═══════════════════════════════════════════════════════════════════════════
  * KAMISUITE — AKIRA · Intérprete de capacidades (Wix Velo)
  * Archivo:  backend/akiraEjecutorLogic.web.js
- * VERSION:  3.1.0
+ * VERSION:  3.2.0
  * FECHA:    6 Septiembre 2026
  *
  * ───────────────────────────────────────────────────────────────────────────
@@ -135,7 +135,8 @@ import wixData from 'wix-data';
 
 import {
   getComposicionServicio,
-  getHuecosDisponibles
+  getHuecosDisponibles,
+  resolverInstanteMadrid
 } from 'backend/widgetPublicoLogic.web';
 
 import {
@@ -160,7 +161,7 @@ import {
 
 import { cargarTodosContactos } from 'backend/recepcionLogic.web';
 
-const VERSION = '3.1.0';
+const VERSION = '3.2.0';
 const TAG = `[AkiraEjecutor][${VERSION}]`;
 
 const CMS_CAPABILITIES = 'AkiraCapabilities';
@@ -184,7 +185,12 @@ const FUNCIONES = {
     extenderReserva, quitarExtension, agregarComplementoReserva,
     agregarServicioReserva, agregarExtraReserva, quitarItemReserva
   },
-  widgetPublicoLogic: { getComposicionServicio, getHuecosDisponibles },
+  // v3.2.0 — resolverInstanteMadrid: día + HH:mm de Madrid → instante UTC.
+  // La necesita mover_cita: reprogramarReserva hace `new Date(cadena)`, y una
+  // cadena sin huso se lee como hora del servidor (UTC), lo que desplazaría
+  // la cita una o dos horas según el horario de verano. Ese desfase es un
+  // cálculo: no puede quedar en manos del modelo.
+  widgetPublicoLogic: { getComposicionServicio, getHuecosDisponibles, resolverInstanteMadrid },
   recepcionLogic: { cargarTodosContactos }
 };
 
