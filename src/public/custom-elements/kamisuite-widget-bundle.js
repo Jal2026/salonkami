@@ -3,7 +3,7 @@
  * BUNDLE para Wix Custom Element (todo-en-uno)
  * =====================================================================
  * Tag name:  kami-reserva
- * VERSION:   2.0.21 (bundle)
+ * VERSION:   2.0.22 (bundle)
  *
  * v2.0.21 — Imagenes redimensionadas en origen (rendimiento en movil 4G).
  *   Pareja del page code `Servicios (Item)` v0.3.6, que ahora envia dos
@@ -1071,7 +1071,18 @@ window.KR_applySkin = function (el, name) {
 /* ============================================================================
    kr-widget.js — <kami-reserva> Custom Element (Shadow DOM)
    ----------------------------------------------------------------------------
-   VERSION: 2.0.21
+   VERSION: 2.0.22
+   v2.0.22 — 🔗 REGLAS DE INCLUSIÓN CONDICIONAL (vista en vivo).
+     Pareja de widgetPublicoLogic v0.11.10 y recepcionProLogic v1.0.57. El
+     motor emite ahora `cfg.reglas = [{si, entonces}]`. Al marcar el servicio
+     A (`si`), el servicio B (`entonces`) pasa a mostrarse "Incluido · 0 €",
+     su precio deja de sumar y su tiempo se añade — igual que hará el motor al
+     crear la cita, para que la pantalla coincida con el cargo final. Al
+     desmarcar A, B vuelve a su estado normal. Solo actúa sobre complementos
+     simples (bool). Sin reglas, cero cambio: `cfg.reglas` llega vacío.
+     Cambios acotados: nuevo helper `_incluidosGratis()`, dos ramas en `_calc`
+     y una en `_renderComplements` (rama bool). Reutiliza clases CSS existentes
+     (kr-label, kr-seg, kr-seg__opt, is-sel); no añade estilos nuevos.
    v2.0.21 — Imagenes redimensionadas en origen (imageCard / imageSq).
    FECHA:   20 de agosto de 2026
 
@@ -1948,6 +1959,33 @@ window.KR_applySkin = function (el, name) {
     _dayById(id) { return this.days.find(d => d.id === id); }
 
     /* ---- pricing / duration ------------------------------------------ */
+
+    // v2.0.22 — REGLAS DE INCLUSIÓN. Devuelve el Set de setupUids que ahora
+    // mismo van "incluidos gratis" porque el servicio que los dispara (`si`)
+    // está elegido. Mismo criterio que el motor (refsIncluidosGratis): un
+    // servicio A cuenta como elegido si el cliente lo marcó (bool sí, o una
+    // opción ≠ 'none' en choice/exclusive). Solo aplica a complementos
+    // simples como B (`entonces`). Sin reglas → Set vacío.
+    _incluidosGratis() {
+      const cfg = this._service;
+      const out = new Set();
+      const reglas = (cfg && Array.isArray(cfg.reglas)) ? cfg.reglas : [];
+      if (!reglas.length || !this.state || !this.state.comp) return out;
+      const chosen = new Set();
+      (cfg.complements || []).forEach(c => {
+        const v = this.state.comp[c.id];
+        if (c.type === "bool") { if (v) chosen.add(c.id); }
+        else if (v && v !== "none") {
+          if (c.type === "exclusive") chosen.add(v); // v = setupUid de la opción elegida
+          else chosen.add(c.id);                     // choice: c.id = setupUid del servicio
+        }
+      });
+      reglas.forEach(r => {
+        if (r && r.si && r.entonces && chosen.has(r.si)) out.add(r.entonces);
+      });
+      return out;
+    }
+
     _calc() {
       const cfg = this._service;
       let price = 0, dur = cfg.baseDuration;
@@ -2001,12 +2039,19 @@ window.KR_applySkin = function (el, name) {
       // v2.0.19 — mismas dos ramas de siempre; lo único que cambia es
       // que un precio null marca `unknown` en vez de `tbd`. Suma de
       // importes y duraciones idéntica a v2.0.18, sin tocar nada.
+      // v2.0.22 — REGLAS: si un complemento simple (bool) está "incluido
+      // gratis" por una regla activa, cuenta su DURACIÓN pero NO su precio,
+      // y lo hace AUNQUE el cliente no lo haya marcado (el motor lo
+      // materializa igual). Espejo exacto de recepcionProLogic v1.0.57.
+      const incGratis = this._incluidosGratis();
       cfg.complements && cfg.complements.forEach(c => {
         const v = this.state.comp[c.id];
         if (c.type === "bool") {
+          if (incGratis.has(c.id)) { dur += c.duration; return; }
           if (v) { if (c.price == null) unknown = true; else price += c.price; dur += c.duration; }
         } else {
           const o = c.options.find(o => o.id === v) || c.options[0];
+          if (incGratis.has(c.id)) { dur += (o ? o.duration : 0); return; }
           if (o.price == null) unknown = true; else price += o.price;
           dur += o.duration;
         }
@@ -2424,15 +2469,33 @@ window.KR_applySkin = function (el, name) {
         this.compsBox.appendChild(vField);
       }
 
+      // v2.0.22 — servicios incluidos gratis ahora mismo por una regla activa.
+      const incGratis = this._incluidosGratis();
+
       this._service.complements.forEach(c => {
         const field = el("div", "kr-field");
         // BOOL: sigue con label + segmento Sí/No como hasta v2.0.13.
         if (c.type === "bool") {
-          const lab = el("label", "kr-label", c.label
-            + (c.price ? ` <small>· +${EUR(c.price)}</small>` : "")
-            + (c.hint ? ` <small>· ${c.hint}</small>` : ""));
-          field.appendChild(lab);
-          field.appendChild(this._boolControl(c));
+          if (incGratis.has(c.id)) {
+            // v2.0.22 — Incluido gratis por regla: se muestra bloqueado, sin
+            // toggle. Reutiliza kr-seg / kr-seg__opt / is-sel del propio CSS.
+            const lab = el("label", "kr-label", c.label
+              + ` <small>· incluido · 0 €</small>`
+              + (c.hint ? ` <small>· ${c.hint}</small>` : ""));
+            field.appendChild(lab);
+            const seg = el("div", "kr-seg");
+            const b = el("button", "kr-seg__opt is-sel", "Incluido");
+            b.type = "button";
+            b.disabled = true;
+            seg.appendChild(b);
+            field.appendChild(seg);
+          } else {
+            const lab = el("label", "kr-label", c.label
+              + (c.price ? ` <small>· +${EUR(c.price)}</small>` : "")
+              + (c.hint ? ` <small>· ${c.hint}</small>` : ""));
+            field.appendChild(lab);
+            field.appendChild(this._boolControl(c));
+          }
         } else if (c.type === "choice" || c.type === "exclusive") {
           // v2.0.14 — CHOICE (variantes M/L/XL de un servicio) y EXCLUSIVE
           // (grupo con varios servicios distintos, elige uno) se pintan
