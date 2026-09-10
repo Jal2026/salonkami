@@ -1,7 +1,24 @@
 // =====================================================
 // KAMISUITE — Backend: Widget Público de Reservas
 // =====================================================
-// VERSION: 0.11.5
+// VERSION: 0.11.10
+//
+// NOTA DE VERSIÓN: el archivo llegó con la cabecera en 0.11.5 pero el código
+//   (`const VERSION`) y el changelog reales estaban en 0.11.9. La cabecera
+//   estaba simplemente sin actualizar. Esta entrega toma 0.11.10 y realinea.
+//
+// v0.11.10 — 🔗 EMITE LAS REGLAS DE INCLUSIÓN AL WIDGET.
+//   Pareja de recepcionProLogic v1.0.57. El motor de armado ya aplica las
+//   reglas { tipo:'regla', subtipo:'incluye', si:A, entonces:B } del mapeoFases
+//   en la creación de la cita (fuente de verdad del precio). Aquí, en la parte
+//   de OFERTA, `adaptarServicio` emite además un array `reglas: [{si,entonces}]`
+//   para que el bundle pueda reflejar en vivo que, al marcar A, el servicio B
+//   pasa a "incluido · 0 €" y su tiempo se suma. Sin este dato el bundle
+//   mostraría a B con su precio hasta el envío; el cargo final ya sería
+//   correcto por el motor, pero la pantalla no coincidiría durante la elección.
+//   Cambio ADITIVO y local a `adaptarServicio`: no toca huecos, disponibilidad,
+//   `complements`, `baseDuration`, filtros ni reparto. Servicios sin reglas
+//   emiten `reglas: []` (cero cambio de comportamiento).
 //
 // v0.11.4 — SE DICE SI ALGO ES OBLIGATORIO O NO.
 //   La respuesta no decía en ninguna parte si lo que faltaba se podía omitir.
@@ -928,7 +945,7 @@
 import { Permissions, webMethod } from 'wix-web-module';
 import wixData from 'wix-data';
 
-const VERSION = '0.11.9';
+const VERSION = '0.11.10';
 const TAG = `[WidgetPublico][${VERSION}]`;
 
 // v0.10.0 — Prefijo de ordenación del nombre del personal.
@@ -1354,6 +1371,21 @@ function adaptarServicio(it, porSetupUid, porSetupUidFases) {
     }
   }
 
+  // v0.11.10 — REGLAS DE INCLUSIÓN CONDICIONAL. Se emiten al widget como
+  // pares { si, entonces } para que el bundle refleje en vivo que, al marcar
+  // A (`si`), el servicio B (`entonces`) pasa a incluido · 0 € y su tiempo se
+  // suma. La fuente de verdad del precio final sigue siendo el motor de armado
+  // (recepcionProLogic v1.0.57); esto es solo para que la pantalla coincida
+  // durante la elección. Servicios sin reglas → array vacío.
+  const reglas = [];
+  if (Array.isArray(mapeo)) {
+    for (const f of mapeo) {
+      if (f && f.tipo === 'regla' && f.subtipo === 'incluye' && f.si && f.entonces) {
+        reglas.push({ si: String(f.si), entonces: String(f.entonces) });
+      }
+    }
+  }
+
   const complementosUidsRaw = jsonIn(it.complementos, 'items');
 
   // v0.7.6 — Set de setupUids que YA salen como opción dentro de algún
@@ -1525,6 +1557,9 @@ function adaptarServicio(it, porSetupUid, porSetupUidFases) {
     // MARCADO al menos uno.
     requiresExtraPro: Array.isArray(complements) && complements.length > 0,
     complements,
+    // v0.11.10 — Reglas de inclusión condicional { si, entonces } para el
+    // bundle. [] si el servicio no tiene ninguna.
+    reglas,
     claseServicio: it.claseServicio || '',
     idStaff: idStaffArr,   // v0.6.0 — wixResourceIds permitidos. [] = todos.
     // v0.9.6 — ¿Este servicio se vende también en bono? Dato PÚBLICO y
