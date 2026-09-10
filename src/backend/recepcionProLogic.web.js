@@ -1,9 +1,59 @@
 // =====================================================
 // KAMISUITE - Backend: Recepción PRO CMS-first
 // =====================================================
-// VERSION: 1.0.55
-// FECHA: 26 de agosto de 2026
+// VERSION: 1.0.57
+// FECHA: 10 de septiembre de 2026
 // ARCHIVO: backend/recepcionProLogic.web.js
+//
+// NOTA DE VERSIÓN: el archivo llegó del repositorio con `const VERSION`
+//   ya en '1.0.56' pero SIN entrada de changelog para ese 1.0.56 (el
+//   registro se detenía en 1.0.55). Para no reutilizar una etiqueta
+//   ambigua, esta entrega toma 1.0.57. Los cambios de esta versión son
+//   únicamente los descritos abajo; el contenido previo del archivo se
+//   respeta íntegro.
+//
+// v1.0.57: 🔗 REGLAS DE INCLUSIÓN CONDICIONAL ENTRE SERVICIOS DE LA CASCADA.
+//          Nueva capacidad de plataforma. Permite declarar que si el cliente
+//          elige un servicio A de la cascada, otro servicio B de la misma
+//          cascada —que puede estar en OTRA posición— se incluye GRATIS.
+//          Resuelve el caso "servicios conectados en posiciones distintas"
+//          (ej.: elegir un tratamiento premium en el paso 3 incluye sin coste
+//          un acabado en el paso 6). Es distinto del grupo exclusivo (chip
+//          rojo, elección en UNA posición): la regla enlaza DOS posiciones.
+//
+//          ─── MODELO DE DATOS (aditivo, dentro de mapeoFases) ───
+//          Un nuevo item en el array `items` de mapeoFases:
+//              { tipo:'regla', subtipo:'incluye', si:<setupUid_A>,
+//                entonces:<setupUid_B> }
+//          `si` y `entonces` son setupUids de servicios que YA son fases
+//          tipo:'servicio' de esta misma cascada. El editor de servicios los
+//          rellena desde desplegables que solo ofrecen servicios ya puestos
+//          en la cascada, así que no pueden apuntar a nada inexistente.
+//          El item 'regla' NO es un evento: no se pinta, no ocupa tiempo, no
+//          reordena. Todos los recorridos existentes (aplicacion/proceso/
+//          exclusivo/servicio) lo ignoran de forma natural por no coincidir
+//          con su tipo. Cero cambios de comportamiento si no hay reglas.
+//
+//          ─── COMPORTAMIENTO ───
+//          construirFasesPack calcula `refsIncluidosGratis`: por cada regla
+//          activa cuyo `si` (A) fue elegido por el cliente (está en compsMap),
+//          añade su `entonces` (B). Al recorrer la cascada, si una fase
+//          tipo:'servicio' referencia un B ∈ refsIncluidosGratis, se
+//          materializa como INCLUIDA (gratis) en su posición, con su propia
+//          duración y su propio bloque, AUNQUE el cliente no lo eligiera y
+//          sea cual sea su configuración de fase (opcional / obligatoria).
+//          Prevalece sobre el modelo trinario para ese servicio.
+//          PRECIO: `refsIncluidosGratis` se propaga a crearPackReserva, que
+//          pone a 0 el precio de esos servicios en compsParaPrecio. Así, si
+//          el cliente además los eligió como complemento, no se cobran.
+//          Si la regla no se dispara (A no elegido), B se comporta como
+//          siempre según su propia fase. Retrocompatible al 100%.
+//
+//          LÍMITE CONOCIDO (asumido, como el CASO B): las reglas solo actúan
+//          en la creación de la cita (crearPackReserva, ruta de reserva
+//          pública y de nueva cita en Recepción). No se aplican al añadir un
+//          servicio POST-creación (agregarServicioReserva no recibe
+//          compsPorRef), igual que ocurre con las variantes obligatorias.
 //
 // v1.0.55: 🛒 EL PRODUCTO VUELVE A LA FICHA DE LA CITA, YA SIN HEURÍSTICA.
 //          La v1.0.47 eliminó el cruce de productos vendidos porque era
@@ -1303,7 +1353,7 @@ import wixData from 'wix-data';
 
 // v1.0.43 — la constante venía desfasada respecto a la cabecera (rezagada
 // en '1.0.41' mientras la cabecera ya documentaba v1.0.42). Se sincroniza.
-const VERSION = '1.0.56';
+const VERSION = '1.0.57';
 const TAG = `[RecepcionPRO][${VERSION}]`;
 const TIMEZONE = 'Europe/Madrid';
 
@@ -2075,6 +2125,22 @@ function construirFasesPack({ principal, porSetupUid, horaInicioISO, compsPorRef
 
   const mapeo = jsonIn(principal.mapeoFases, 'items');
 
+  // v1.0.57 — REGLAS DE INCLUSIÓN CONDICIONAL. Recorre los items
+  // { tipo:'regla', subtipo:'incluye', si:<uidA>, entonces:<uidB> } del mapeo.
+  // Si el cliente eligió A (su uid está en compsMap), el servicio B pasa a
+  // `refsIncluidosGratis`: se materializará INCLUIDO (gratis) en su posición,
+  // sea cual sea su configuración de fase, y aunque el cliente no lo eligiera.
+  // Un item 'regla' no es un evento: no lo pinta ningún recorrido posterior
+  // (no coincide con aplicacion/proceso/exclusivo/servicio).
+  const refsIncluidosGratis = new Set();
+  if (Array.isArray(mapeo)) {
+    for (const f of mapeo) {
+      if (f && f.tipo === 'regla' && f.subtipo === 'incluye' && f.si && f.entonces) {
+        if (compsMap.has(f.si)) refsIncluidosGratis.add(f.entonces);
+      }
+    }
+  }
+
   // v1.0.34 — HELPER interno para materializar un servicio en la cascada
   // desdoblándolo en Aplicación + Proceso cuando svc.minProceso > 0.
   // Uniforme para Caso A/B/C y la nueva rama 'exclusivo'. Cero cambio de
@@ -2136,7 +2202,7 @@ function construirFasesPack({ principal, porSetupUid, horaInicioISO, compsPorRef
       ocupa: true
     });
     cursorISO = endISO;
-    return { fases, refsConsumidos, faltanVariantes };
+    return { fases, refsConsumidos, faltanVariantes, refsIncluidosGratis };
   }
 
   // Servicio complejo: recorrer mapeoFases en orden literal.
@@ -2221,6 +2287,17 @@ function construirFasesPack({ principal, porSetupUid, horaInicioISO, compsPorRef
         console.warn(`${TAG} ⚠️ Fase ref no encontrada en catálogo: ${f.ref}`);
         continue;
       }
+
+      // v1.0.57 — REGLA DE INCLUSIÓN: una regla activa hace que este servicio
+      // vaya INCLUIDO (gratis) en su posición, aunque el cliente no lo eligiera
+      // y sea cual sea su obligatoriedad. Prevalece sobre el modelo trinario.
+      // El precio se pone a 0 en crearPackReserva vía refsIncluidosGratis.
+      if (refsIncluidosGratis.has(f.ref)) {
+        materializarConProceso(svc, 'INCLUIDA', svc.label || '', svc.duration);
+        refsConsumidos.add(f.ref);
+        continue;
+      }
+
       const esObligatoria = (f.obligatorio === true);
       const comp = compsMap.get(f.ref);
 
@@ -2258,7 +2335,7 @@ function construirFasesPack({ principal, porSetupUid, horaInicioISO, compsPorRef
     }
   }
 
-  return { fases, refsConsumidos, faltanVariantes };
+  return { fases, refsConsumidos, faltanVariantes, refsIncluidosGratis };
 }
 
 // =====================================================
@@ -2526,7 +2603,7 @@ export const crearPackReserva = webMethod(
 
       // ─── 5. Construir cascada (aplicación + proceso + comps elegidos en su posición) ───
       const startISO = madridToUTC(fecha, horaHHmm);
-      const { fases: fasesPack, refsConsumidos, faltanVariantes } = construirFasesPack({
+      const { fases: fasesPack, refsConsumidos, faltanVariantes, refsIncluidosGratis } = construirFasesPack({
         principal,
         porSetupUid,
         horaInicioISO: startISO,
@@ -2576,7 +2653,14 @@ export const crearPackReserva = webMethod(
       // compsParaPrecio: TODOS los complementos elegidos (independiente de si
       // se materializaron en el mapeo o al final). Se usa para precioTotal,
       // serviciosDetail y title.
-      const compsParaPrecio = compsNorm.map(c => ({ label: c.label, price: c.price }));
+      // v1.0.57 — Si una regla de inclusión hizo gratis a un servicio
+      // (refsIncluidosGratis), su precio se pone a 0 aquí: así, aunque el
+      // cliente además lo eligiera como complemento, no se cobra.
+      const _incluidosGratis = (refsIncluidosGratis instanceof Set) ? refsIncluidosGratis : new Set();
+      const compsParaPrecio = compsNorm.map(c => ({
+        label: c.label,
+        price: _incluidosGratis.has(c.setupUid) ? 0 : c.price
+      }));
 
       if (fasesPack.length === 0) {
         return { ok: false, version: VERSION, error: { message: 'El pack no generó ninguna fase' } };
