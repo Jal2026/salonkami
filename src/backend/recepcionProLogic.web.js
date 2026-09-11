@@ -1,9 +1,23 @@
 // =====================================================
 // KAMISUITE - Backend: Recepción PRO CMS-first
 // =====================================================
-// VERSION: 1.0.58
+// VERSION: 1.0.59
 // FECHA: 11 de septiembre de 2026
 // ARCHIVO: backend/recepcionProLogic.web.js
+//
+// v1.0.59: 🔓 REGLA INVERSA CON DESBLOQUEO PERMITIDO (`permiteQuitar`).
+//          Amplía la mitad inversa (1.0.58) con un flag `permiteQuitar`.
+//          · inverso true + permiteQuitar AUSENTE/false → B se FUERZA como
+//            obligatorio de pago cuando A no se elige (comportamiento 1.0.58,
+//            sin escapatoria).
+//          · inverso true + permiteQuitar true → B YA NO se fuerza en el motor.
+//            Se comporta como complemento normal: el widget lo pone marcado
+//            por defecto y el cliente puede quitarlo tras un aviso claro. Si
+//            lo deja, llega en el payload y se cobra por la vía normal; si lo
+//            quita, no llega y no se cobra (el precio puede bajar al base).
+//          Cambio mínimo y quirúrgico: solo la condición que alimenta
+//          refsObligadosDePago. El resto del armado y del precio, intacto.
+//          Retrocompatible: reglas sin permiteQuitar se comportan como 1.0.58.
 //
 // v1.0.58: 🔁 MITAD INVERSA DE LA REGLA DE INCLUSIÓN.
 //          Amplía la regla { tipo:'regla', subtipo:'incluye', si:A, entonces:B }
@@ -1363,7 +1377,7 @@ import wixData from 'wix-data';
 
 // v1.0.43 — la constante venía desfasada respecto a la cabecera (rezagada
 // en '1.0.41' mientras la cabecera ya documentaba v1.0.42). Se sincroniza.
-const VERSION = '1.0.58';
+const VERSION = '1.0.59';
 const TAG = `[RecepcionPRO][${VERSION}]`;
 const TIMEZONE = 'Europe/Madrid';
 
@@ -2146,13 +2160,17 @@ function construirFasesPack({ principal, porSetupUid, horaInicioISO, compsPorRef
   // v1.0.58 — MITAD INVERSA: B de reglas con `inverso` cuyo A NO fue elegido.
   // Esos B pasan a obligatorios y de pago: se materializan aunque el cliente
   // no los eligiera y su precio se suma en crearPackReserva.
+  // v1.0.59 — Solo se FUERZAN los inversos NO quitables. Si la regla permite
+  // quitar (`permiteQuitar`), B NO se fuerza aquí: se comporta como complemento
+  // normal (el widget lo pone por defecto y el cliente puede quitarlo con
+  // aviso; si lo deja, llega en el payload y se cobra por la vía normal).
   const refsObligadosDePago = new Set();
   if (Array.isArray(mapeo)) {
     for (const f of mapeo) {
       if (f && f.tipo === 'regla' && f.subtipo === 'incluye' && f.si && f.entonces) {
         if (compsMap.has(f.si)) {
           refsIncluidosGratis.add(f.entonces);
-        } else if (f.inverso === true) {
+        } else if (f.inverso === true && f.permiteQuitar !== true) {
           refsObligadosDePago.add(f.entonces);
         }
       }
