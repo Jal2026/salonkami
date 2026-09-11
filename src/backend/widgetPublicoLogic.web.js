@@ -1,11 +1,14 @@
 // =====================================================
 // KAMISUITE — Backend: Widget Público de Reservas
 // =====================================================
-// VERSION: 0.11.10
+// VERSION: 0.11.11
 //
-// NOTA DE VERSIÓN: el archivo llegó con la cabecera en 0.11.5 pero el código
-//   (`const VERSION`) y el changelog reales estaban en 0.11.9. La cabecera
-//   estaba simplemente sin actualizar. Esta entrega toma 0.11.10 y realinea.
+// v0.11.11 — 🔁 EMITE EL FLAG `inverso` DE LAS REGLAS.
+//   Pareja de recepcionProLogic v1.0.58 y bundle v2.0.23. Cada regla emitida
+//   lleva ahora `inverso` (bool). Cuando es true, el bundle muestra B como
+//   obligatorio y de pago mientras A no esté elegido, y como incluido gratis
+//   en cuanto A se elige. Aditivo: reglas sin `inverso` → false, comportamiento
+//   idéntico a 0.11.10.
 //
 // v0.11.10 — 🔗 EMITE LAS REGLAS DE INCLUSIÓN AL WIDGET.
 //   Pareja de recepcionProLogic v1.0.57. El motor de armado ya aplica las
@@ -945,7 +948,7 @@
 import { Permissions, webMethod } from 'wix-web-module';
 import wixData from 'wix-data';
 
-const VERSION = '0.11.10';
+const VERSION = '0.11.11';
 const TAG = `[WidgetPublico][${VERSION}]`;
 
 // v0.10.0 — Prefijo de ordenación del nombre del personal.
@@ -1381,7 +1384,7 @@ function adaptarServicio(it, porSetupUid, porSetupUidFases) {
   if (Array.isArray(mapeo)) {
     for (const f of mapeo) {
       if (f && f.tipo === 'regla' && f.subtipo === 'incluye' && f.si && f.entonces) {
-        reglas.push({ si: String(f.si), entonces: String(f.entonces) });
+        reglas.push({ si: String(f.si), entonces: String(f.entonces), inverso: f.inverso === true });
       }
     }
   }
