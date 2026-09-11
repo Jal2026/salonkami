@@ -3,7 +3,7 @@
  * BUNDLE para Wix Custom Element (todo-en-uno)
  * =====================================================================
  * Tag name:  kami-reserva
- * VERSION:   2.0.22 (bundle)
+ * VERSION:   2.0.23 (bundle)
  *
  * v2.0.21 — Imagenes redimensionadas en origen (rendimiento en movil 4G).
  *   Pareja del page code `Servicios (Item)` v0.3.6, que ahora envia dos
@@ -1071,7 +1071,15 @@ window.KR_applySkin = function (el, name) {
 /* ============================================================================
    kr-widget.js — <kami-reserva> Custom Element (Shadow DOM)
    ----------------------------------------------------------------------------
-   VERSION: 2.0.22
+   VERSION: 2.0.23
+   v2.0.23 — 🔁 MITAD INVERSA DE LA REGLA (vista en vivo).
+     Pareja de widgetPublicoLogic v0.11.11 y recepcionProLogic v1.0.58. Cuando
+     una regla lleva `inverso` y su servicio A NO está elegido, el servicio B
+     (simple) se muestra "Sí · +precio · obligatorio", bloqueado, y suma precio
+     y tiempo aunque el cliente no lo marque. En cuanto elige A, B pasa a
+     "Incluido · 0 €". Así B nunca falta: o incluido con A, o obligatorio sin A.
+     Nuevo helper compartido `_serviciosElegidos()`, nuevo `_obligadosDePago()`,
+     y ramas en `_calc` y `_renderComplements`. Reutiliza clases CSS existentes.
    v2.0.22 — 🔗 REGLAS DE INCLUSIÓN CONDICIONAL (vista en vivo).
      Pareja de widgetPublicoLogic v0.11.10 y recepcionProLogic v1.0.57. El
      motor emite ahora `cfg.reglas = [{si, entonces}]`. Al marcar el servicio
@@ -1960,18 +1968,14 @@ window.KR_applySkin = function (el, name) {
 
     /* ---- pricing / duration ------------------------------------------ */
 
-    // v2.0.22 — REGLAS DE INCLUSIÓN. Devuelve el Set de setupUids que ahora
-    // mismo van "incluidos gratis" porque el servicio que los dispara (`si`)
-    // está elegido. Mismo criterio que el motor (refsIncluidosGratis): un
-    // servicio A cuenta como elegido si el cliente lo marcó (bool sí, o una
-    // opción ≠ 'none' en choice/exclusive). Solo aplica a complementos
-    // simples como B (`entonces`). Sin reglas → Set vacío.
-    _incluidosGratis() {
+    // v2.0.23 — Set de setupUids que el cliente tiene elegidos ahora mismo.
+    // Un servicio cuenta como elegido si está marcado (bool sí, o una opción
+    // ≠ 'none' en choice/exclusive). Base común de las dos mitades de una
+    // regla. Mismo criterio que el motor (compsMap).
+    _serviciosElegidos() {
       const cfg = this._service;
-      const out = new Set();
-      const reglas = (cfg && Array.isArray(cfg.reglas)) ? cfg.reglas : [];
-      if (!reglas.length || !this.state || !this.state.comp) return out;
       const chosen = new Set();
+      if (!cfg || !this.state || !this.state.comp) return chosen;
       (cfg.complements || []).forEach(c => {
         const v = this.state.comp[c.id];
         if (c.type === "bool") { if (v) chosen.add(c.id); }
@@ -1980,8 +1984,36 @@ window.KR_applySkin = function (el, name) {
           else chosen.add(c.id);                     // choice: c.id = setupUid del servicio
         }
       });
+      return chosen;
+    }
+
+    // v2.0.22 — REGLAS DE INCLUSIÓN. Devuelve el Set de setupUids que ahora
+    // mismo van "incluidos gratis" porque el servicio que los dispara (`si`)
+    // está elegido. Solo aplica a complementos simples como B (`entonces`).
+    _incluidosGratis() {
+      const cfg = this._service;
+      const out = new Set();
+      const reglas = (cfg && Array.isArray(cfg.reglas)) ? cfg.reglas : [];
+      if (!reglas.length) return out;
+      const chosen = this._serviciosElegidos();
       reglas.forEach(r => {
         if (r && r.si && r.entonces && chosen.has(r.si)) out.add(r.entonces);
+      });
+      return out;
+    }
+
+    // v2.0.23 — MITAD INVERSA. Devuelve el Set de setupUids que ahora mismo son
+    // OBLIGATORIOS y de PAGO: B de una regla con `inverso` cuyo A NO está
+    // elegido. Espejo de refsObligadosDePago del motor. Nunca puede coincidir
+    // con _incluidosGratis (una exige A elegido, la otra A no elegido).
+    _obligadosDePago() {
+      const cfg = this._service;
+      const out = new Set();
+      const reglas = (cfg && Array.isArray(cfg.reglas)) ? cfg.reglas : [];
+      if (!reglas.length) return out;
+      const chosen = this._serviciosElegidos();
+      reglas.forEach(r => {
+        if (r && r.inverso && r.si && r.entonces && !chosen.has(r.si)) out.add(r.entonces);
       });
       return out;
     }
@@ -2043,11 +2075,16 @@ window.KR_applySkin = function (el, name) {
       // gratis" por una regla activa, cuenta su DURACIÓN pero NO su precio,
       // y lo hace AUNQUE el cliente no lo haya marcado (el motor lo
       // materializa igual). Espejo exacto de recepcionProLogic v1.0.57.
+      // v2.0.23 — MITAD INVERSA: si un complemento simple está "obligado de
+      // pago" (regla inversa, A no elegido), cuenta duración Y precio, aunque
+      // no esté marcado. Espejo de refsObligadosDePago (v1.0.58).
       const incGratis = this._incluidosGratis();
+      const obligPago = this._obligadosDePago();
       cfg.complements && cfg.complements.forEach(c => {
         const v = this.state.comp[c.id];
         if (c.type === "bool") {
           if (incGratis.has(c.id)) { dur += c.duration; return; }
+          if (obligPago.has(c.id)) { if (c.price == null) unknown = true; else price += c.price; dur += c.duration; return; }
           if (v) { if (c.price == null) unknown = true; else price += c.price; dur += c.duration; }
         } else {
           const o = c.options.find(o => o.id === v) || c.options[0];
@@ -2471,6 +2508,8 @@ window.KR_applySkin = function (el, name) {
 
       // v2.0.22 — servicios incluidos gratis ahora mismo por una regla activa.
       const incGratis = this._incluidosGratis();
+      // v2.0.23 — servicios obligados de pago ahora mismo (mitad inversa).
+      const obligPago = this._obligadosDePago();
 
       this._service.complements.forEach(c => {
         const field = el("div", "kr-field");
@@ -2485,6 +2524,20 @@ window.KR_applySkin = function (el, name) {
             field.appendChild(lab);
             const seg = el("div", "kr-seg");
             const b = el("button", "kr-seg__opt is-sel", "Incluido");
+            b.type = "button";
+            b.disabled = true;
+            seg.appendChild(b);
+            field.appendChild(seg);
+          } else if (obligPago.has(c.id)) {
+            // v2.0.23 — Obligado de pago (mitad inversa, A no elegido): se
+            // muestra seleccionado y bloqueado, con su precio. La clienta no
+            // lo puede quitar. Reutiliza las clases del propio CSS.
+            const lab = el("label", "kr-label", c.label
+              + (c.price ? ` <small>· +${EUR(c.price)} · obligatorio</small>` : ` <small>· obligatorio</small>`)
+              + (c.hint ? ` <small>· ${c.hint}</small>` : ""));
+            field.appendChild(lab);
+            const seg = el("div", "kr-seg");
+            const b = el("button", "kr-seg__opt is-sel", "Sí");
             b.type = "button";
             b.disabled = true;
             seg.appendChild(b);
