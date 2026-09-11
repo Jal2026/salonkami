@@ -1,7 +1,13 @@
 // =====================================================
 // KAMISUITE — Backend: Widget Público de Reservas
 // =====================================================
-// VERSION: 0.11.11
+// VERSION: 0.11.12
+//
+// v0.11.12 — 🔓 EMITE EL FLAG `permiteQuitar` DE LAS REGLAS.
+//   Pareja de recepcionProLogic v1.0.59 y bundle v2.0.24. Cada regla emitida
+//   lleva ahora también `permiteQuitar` (bool). Cuando inverso+permiteQuitar,
+//   el bundle muestra B marcado por defecto pero con toggle: el cliente puede
+//   quitarlo tras un aviso. Aditivo; sin el flag → false.
 //
 // v0.11.11 — 🔁 EMITE EL FLAG `inverso` DE LAS REGLAS.
 //   Pareja de recepcionProLogic v1.0.58 y bundle v2.0.23. Cada regla emitida
@@ -948,7 +954,7 @@
 import { Permissions, webMethod } from 'wix-web-module';
 import wixData from 'wix-data';
 
-const VERSION = '0.11.11';
+const VERSION = '0.11.12';
 const TAG = `[WidgetPublico][${VERSION}]`;
 
 // v0.10.0 — Prefijo de ordenación del nombre del personal.
@@ -1384,7 +1390,7 @@ function adaptarServicio(it, porSetupUid, porSetupUidFases) {
   if (Array.isArray(mapeo)) {
     for (const f of mapeo) {
       if (f && f.tipo === 'regla' && f.subtipo === 'incluye' && f.si && f.entonces) {
-        reglas.push({ si: String(f.si), entonces: String(f.entonces), inverso: f.inverso === true });
+        reglas.push({ si: String(f.si), entonces: String(f.entonces), inverso: f.inverso === true, permiteQuitar: f.permiteQuitar === true });
       }
     }
   }
