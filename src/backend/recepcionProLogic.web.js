@@ -1,16 +1,26 @@
 // =====================================================
 // KAMISUITE - Backend: Recepción PRO CMS-first
 // =====================================================
-// VERSION: 1.0.57
-// FECHA: 10 de septiembre de 2026
+// VERSION: 1.0.58
+// FECHA: 11 de septiembre de 2026
 // ARCHIVO: backend/recepcionProLogic.web.js
 //
-// NOTA DE VERSIÓN: el archivo llegó del repositorio con `const VERSION`
-//   ya en '1.0.56' pero SIN entrada de changelog para ese 1.0.56 (el
-//   registro se detenía en 1.0.55). Para no reutilizar una etiqueta
-//   ambigua, esta entrega toma 1.0.57. Los cambios de esta versión son
-//   únicamente los descritos abajo; el contenido previo del archivo se
-//   respeta íntegro.
+// v1.0.58: 🔁 MITAD INVERSA DE LA REGLA DE INCLUSIÓN.
+//          Amplía la regla { tipo:'regla', subtipo:'incluye', si:A, entonces:B }
+//          con un flag booleano `inverso`. Cuando `inverso === true`:
+//            · Si el cliente ELIGE A  → B va incluido y gratis (igual que antes).
+//            · Si el cliente NO elige A → B pasa a OBLIGATORIO y de PAGO: se
+//              materializa en su posición aunque el cliente no lo eligiera, y
+//              su precio de catálogo se suma al total. La clienta no puede
+//              quedarse sin B (caso "o peinado o secado, pero secado siempre").
+//          Si `inverso` es falso/ausente, la regla se comporta como en 1.0.57
+//          (solo la mitad "incluye gratis"). B debe ser un servicio simple.
+//          Implementación: construirFasesPack calcula además
+//          `refsObligadosDePago` (B de reglas inversas cuyo A NO fue elegido) y
+//          lo devuelve; la rama servicio los materializa como COMPLEMENTO de
+//          pago; y crearPackReserva suma su precio de catálogo si no estaban ya
+//          entre los complementos elegidos. Retrocompatible: sin reglas
+//          inversas, cero cambio.
 //
 // v1.0.57: 🔗 REGLAS DE INCLUSIÓN CONDICIONAL ENTRE SERVICIOS DE LA CASCADA.
 //          Nueva capacidad de plataforma. Permite declarar que si el cliente
@@ -1353,7 +1363,7 @@ import wixData from 'wix-data';
 
 // v1.0.43 — la constante venía desfasada respecto a la cabecera (rezagada
 // en '1.0.41' mientras la cabecera ya documentaba v1.0.42). Se sincroniza.
-const VERSION = '1.0.57';
+const VERSION = '1.0.58';
 const TAG = `[RecepcionPRO][${VERSION}]`;
 const TIMEZONE = 'Europe/Madrid';
 
@@ -2133,10 +2143,18 @@ function construirFasesPack({ principal, porSetupUid, horaInicioISO, compsPorRef
   // Un item 'regla' no es un evento: no lo pinta ningún recorrido posterior
   // (no coincide con aplicacion/proceso/exclusivo/servicio).
   const refsIncluidosGratis = new Set();
+  // v1.0.58 — MITAD INVERSA: B de reglas con `inverso` cuyo A NO fue elegido.
+  // Esos B pasan a obligatorios y de pago: se materializan aunque el cliente
+  // no los eligiera y su precio se suma en crearPackReserva.
+  const refsObligadosDePago = new Set();
   if (Array.isArray(mapeo)) {
     for (const f of mapeo) {
       if (f && f.tipo === 'regla' && f.subtipo === 'incluye' && f.si && f.entonces) {
-        if (compsMap.has(f.si)) refsIncluidosGratis.add(f.entonces);
+        if (compsMap.has(f.si)) {
+          refsIncluidosGratis.add(f.entonces);
+        } else if (f.inverso === true) {
+          refsObligadosDePago.add(f.entonces);
+        }
       }
     }
   }
@@ -2202,7 +2220,7 @@ function construirFasesPack({ principal, porSetupUid, horaInicioISO, compsPorRef
       ocupa: true
     });
     cursorISO = endISO;
-    return { fases, refsConsumidos, faltanVariantes, refsIncluidosGratis };
+    return { fases, refsConsumidos, faltanVariantes, refsIncluidosGratis, refsObligadosDePago };
   }
 
   // Servicio complejo: recorrer mapeoFases en orden literal.
@@ -2298,6 +2316,15 @@ function construirFasesPack({ principal, porSetupUid, horaInicioISO, compsPorRef
         continue;
       }
 
+      // v1.0.58 — MITAD INVERSA: A no elegido y la regla es `inverso`. B pasa
+      // a obligatorio y de pago: se materializa aunque el cliente no lo
+      // eligiera. Su precio se suma en crearPackReserva (refsObligadosDePago).
+      if (refsObligadosDePago.has(f.ref)) {
+        materializarConProceso(svc, 'COMPLEMENTO', svc.label || '', svc.duration);
+        refsConsumidos.add(f.ref);
+        continue;
+      }
+
       const esObligatoria = (f.obligatorio === true);
       const comp = compsMap.get(f.ref);
 
@@ -2335,7 +2362,7 @@ function construirFasesPack({ principal, porSetupUid, horaInicioISO, compsPorRef
     }
   }
 
-  return { fases, refsConsumidos, faltanVariantes, refsIncluidosGratis };
+  return { fases, refsConsumidos, faltanVariantes, refsIncluidosGratis, refsObligadosDePago };
 }
 
 // =====================================================
@@ -2603,7 +2630,7 @@ export const crearPackReserva = webMethod(
 
       // ─── 5. Construir cascada (aplicación + proceso + comps elegidos en su posición) ───
       const startISO = madridToUTC(fecha, horaHHmm);
-      const { fases: fasesPack, refsConsumidos, faltanVariantes, refsIncluidosGratis } = construirFasesPack({
+      const { fases: fasesPack, refsConsumidos, faltanVariantes, refsIncluidosGratis, refsObligadosDePago } = construirFasesPack({
         principal,
         porSetupUid,
         horaInicioISO: startISO,
@@ -2661,6 +2688,19 @@ export const crearPackReserva = webMethod(
         label: c.label,
         price: _incluidosGratis.has(c.setupUid) ? 0 : c.price
       }));
+
+      // v1.0.58 — MITAD INVERSA: los servicios obligados de pago (B de una
+      // regla inversa cuyo A no se eligió) que NO estén ya entre los elegidos
+      // se añaden al precio con su importe de catálogo. Si el cliente además
+      // lo eligió, ya está en compsParaPrecio y no se duplica.
+      const _obligadosDePago = (refsObligadosDePago instanceof Set) ? refsObligadosDePago : new Set();
+      _obligadosDePago.forEach(uid => {
+        const yaElegido = compsNorm.some(c => c.setupUid === uid);
+        if (!yaElegido) {
+          const svc = porSetupUid[uid];
+          if (svc) compsParaPrecio.push({ label: svc.label || '', price: toNum(svc.price) });
+        }
+      });
 
       if (fasesPack.length === 0) {
         return { ok: false, version: VERSION, error: { message: 'El pack no generó ninguna fase' } };
