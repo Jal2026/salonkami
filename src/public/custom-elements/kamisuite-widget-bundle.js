@@ -3,7 +3,7 @@
  * BUNDLE para Wix Custom Element (todo-en-uno)
  * =====================================================================
  * Tag name:  kami-reserva
- * VERSION:   2.0.24 (bundle)
+ * VERSION:   2.0.25 (bundle)
  *
  * v2.0.21 — Imagenes redimensionadas en origen (rendimiento en movil 4G).
  *   Pareja del page code `Servicios (Item)` v0.3.6, que ahora envia dos
@@ -1071,7 +1071,15 @@ window.KR_applySkin = function (el, name) {
 /* ============================================================================
    kr-widget.js — <kami-reserva> Custom Element (Shadow DOM)
    ----------------------------------------------------------------------------
-   VERSION: 2.0.24
+   VERSION: 2.0.25
+   v2.0.25 — 🩹 ARRANQUE DEL QUITABLE + FRASES DE CONSECUENCIA.
+     (A) FIX: un servicio quitable por regla inversa arrancaba en "No" porque
+     _initState ponía todos los bool a false. Ahora arranca en "Sí" (puesto por
+     defecto), como debe; el cliente lo quita con aviso. (B) La pantalla de
+     reserva confirmada muestra ahora la consecuencia de la regla: "✓ Incluye
+     <servicio>" cuando el disparador se eligió, y "ⓘ No incluye <servicio>.
+     Puede añadirlo en el salón." cuando el cliente usó el desbloqueo. Nuevo
+     helper `_consecuenciasReglas()`. Sin reglas, cero cambio.
    v2.0.24 — 🔓 DESBLOQUEO CON AVISO (mitad inversa quitable).
      Pareja de widgetPublicoLogic v0.11.12 y recepcionProLogic v1.0.59. Cuando
      una regla inversa lleva `permiteQuitar`, el servicio B (simple) sale puesto
@@ -1676,8 +1684,17 @@ window.KR_applySkin = function (el, name) {
       this.days = this._buildDays();
       const firstFree = this.days.find(d => !d.full) || this.days[0];
       const comp = {};
+      // v2.0.25 — Los servicios "quitables por regla inversa" (inverso +
+      // permiteQuitar) arrancan PUESTOS (true), no en "No". Al inicializar
+      // nada está elegido, así que todos los B de reglas inverso+permiteQuitar
+      // salen por defecto marcados; el cliente puede quitarlos con aviso.
+      const quitInit = new Set();
+      (cfg.reglas || []).forEach(r => {
+        if (r && r.inverso && r.permiteQuitar && r.entonces) quitInit.add(r.entonces);
+      });
       (cfg.complements || []).forEach(c => {
-        comp[c.id] = c.type === "bool" ? false : (c.default || c.options[0].id);
+        if (c.type === "bool") comp[c.id] = quitInit.has(c.id) ? true : false;
+        else comp[c.id] = (c.default || c.options[0].id);
       });
       this.state = {
         dayId: firstFree.id,
@@ -2042,6 +2059,35 @@ window.KR_applySkin = function (el, name) {
       const chosen = this._serviciosElegidos();
       reglas.forEach(r => {
         if (r && r.inverso && r.permiteQuitar && r.si && r.entonces && !chosen.has(r.si)) out.add(r.entonces);
+      });
+      return out;
+    }
+
+    // v2.0.25 — Frases de consecuencia de las reglas para el resumen de la
+    // reserva confirmada. Dos casos:
+    //   · A elegido  → "Incluye <B>" (la regla añade B gratis).
+    //   · A no elegido, B quitable y quitado por el cliente → "No incluye <B>.
+    //     Puede añadirlo en el salón." (dejó constancia del desbloqueo).
+    // El nombre de B se toma de su complemento en el catálogo.
+    _consecuenciasReglas() {
+      const cfg = this._service;
+      const reglas = (cfg && Array.isArray(cfg.reglas)) ? cfg.reglas : [];
+      if (!reglas.length || !this.state || !this.state.comp) return [];
+      const chosen = this._serviciosElegidos();
+      const labelDe = (uid) => {
+        const c = (cfg.complements || []).find(x => x.id === uid);
+        return c ? (c.label || '') : '';
+      };
+      const out = [];
+      reglas.forEach(r => {
+        if (!r || !r.si || !r.entonces) return;
+        const lab = labelDe(r.entonces);
+        if (!lab) return;
+        if (chosen.has(r.si)) {
+          out.push({ tipo: 'incluye', texto: `Incluye ${lab}` });
+        } else if (r.inverso && r.permiteQuitar && this.state.comp[r.entonces] === false) {
+          out.push({ tipo: 'no-incluye', texto: `No incluye ${lab}. Puede añadirlo en el salón.` });
+        }
       });
       return out;
     }
@@ -3450,6 +3496,12 @@ window.KR_applySkin = function (el, name) {
 
       this.body.hidden = true;
       this.confirmHost.hidden = false;
+      // v2.0.25 — Frases de consecuencia de las reglas (incluye / no incluye).
+      const _consec = this._consecuenciasReglas();
+      const consecBlock = _consec.length ? `
+          <div style="margin-top:14px;display:flex;flex-direction:column;gap:6px;text-align:left;">
+            ${_consec.map(x => `<div style="font-size:13px;padding:9px 13px;border-radius:9px;${x.tipo === 'incluye' ? 'background:rgba(46,125,50,.10);color:#2e7d32;' : 'background:rgba(176,110,0,.12);color:#8a5a00;'}">${x.tipo === 'incluye' ? '✓ ' : 'ⓘ '}${x.texto}</div>`).join('')}
+          </div>` : '';
       this.confirmHost.innerHTML = `
         <div class="kr-confirm">
           <div class="kr-confirm__badge">${ICON.check}</div>
@@ -3462,6 +3514,7 @@ window.KR_applySkin = function (el, name) {
             <div class="kr-prow"><span class="kr-prow__k">Duración aprox.</span><span class="kr-prow__v">${durTxt(calc.duration)}</span></div>
             <div class="kr-prow"><span class="kr-prow__k">Pago</span><span class="kr-prow__v">${payTxt}</span></div>
           </div>
+          ${consecBlock}
           ${promoBlockConf}
           <div class="kr-confirm__d" style="margin-top:18px">${closing}</div>
           <button class="kr-linkbtn" type="button" id="kr-again">Hacer otra reserva</button>
