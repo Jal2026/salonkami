@@ -1,5 +1,5 @@
 // =====================================================
-// KAMISUITE - Edición Categorías (Tour de Servicios) - Backend
+// KAMISUITE - Edición Categorías (Tour de Servicios) - Backend 
 // =====================================================
 // VERSION: 1.2.0
 // FECHA: 13 de septiembre de 2026
