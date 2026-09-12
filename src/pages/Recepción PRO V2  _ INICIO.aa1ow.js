@@ -1,8 +1,39 @@
 // =====================================================
 // KAMISUITE - Page Code: Nueva Recepción PRO (CMS-first)
 // =====================================================
-// VERSION: 1.0.48
-// FECHA: 19 de agosto de 2026
+// VERSION: 1.0.49
+// FECHA: 13 de septiembre de 2026
+//
+// v1.0.49: FIX — el buscador se quedaba en "Cargando clientes...".
+//
+//          SÍNTOMA. El aside se quedaba clavado en "Cargando
+//          clientes..." y solo se arreglaba refrescando varias veces.
+//
+//          CAUSA (verificada en log de producción, Salón Kami,
+//          13-sep-2026 00:46). Carrera de arranque entre el page code y
+//          el custom element:
+//            00:46:08.121  caché de clientes lista → sendResponse(
+//                          'clientesReady') — el widget AÚN NO EXISTE.
+//            00:46:10.118  el widget monta y manda su primer 'ready'.
+//          El aviso se emitió dos segundos antes de que hubiera nadie
+//          escuchando. Y al llegar el 'ready', el handler decidía no
+//          hacer nada porque la caché ya estaba cargada, así que el
+//          aviso no se repetía nunca. El widget esperaba un mensaje
+//          que ya había pasado.
+//
+//          Por eso refrescar funcionaba a veces: cada recarga cambia el
+//          orden de la carrera, y cuando el widget monta ANTES de que
+//          termine la caché, sí pilla el aviso.
+//
+//          FIX. Una línea, en el case 'ready': si la caché ya está
+//          lista, se reenvía 'clientesReady' con el total en vez de
+//          callarse. Es exactamente lo que ya hacía el case
+//          'clientesReady' (línea de abajo), que el widget no llega a
+//          pedir nunca.
+//
+//          Cambio aditivo. No toca cargarCacheClientes, ni la búsqueda,
+//          ni las insignias de ficha técnica y producto activo, ni
+//          ningún otro handler.
 //
 // v1.0.48: Marca de PRODUCTO ACTIVO en el buscador de clientes.
 //          Segunda insignia, junto a la de ficha técnica de v1.0.47.
@@ -660,7 +691,7 @@ import {
   desactivarFichaClienteRecord
 } from 'backend/clientRecordsLogic.web';
 
-const TAG = '[RecepcionProCMS v1.0.48]';
+const TAG = '[RecepcionProCMS v1.0.49]';
 
 // ID del Custom Element en la página (ajustar al ID real del editor Wix).
 const ELEMENT_ID = '#recepcionProCMS';
@@ -2101,7 +2132,9 @@ $w.onReady(function () {
 
     try {
       switch (msg.type) {
-        case 'ready':            handleGetCatalogo(); handleGetStaff(); if (!cacheReady) cargarCacheClientes(); break;
+        // v1.0.49 — si la caché ya está lista, hay que REPETIR el aviso:
+        // el widget montó después de que se emitiera y no lo oyó.
+        case 'ready':            handleGetCatalogo(); handleGetStaff(); if (!cacheReady) cargarCacheClientes(); else sendResponse('clientesReady', { total: cacheContactos.length }); break;
         case 'getCatalogo':      handleGetCatalogo(); break;
         case 'getStaff':         handleGetStaff(); break;
         case 'getReservas':      handleGetReservas(msg.fecha); break;
