@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  sugerenciasProductosLogic.web.js — Sugerencias de producto     ║
-// ║  KAMISUITE · v1.0.0 · 13 Septiembre 2026                        ║
+// ║  KAMISUITE · v1.0.1 · 13 Septiembre 2026                        ║
 // ╚══════════════════════════════════════════════════════════════════╝
 //
 // FUNCIÓN: construye el bloque HTML de sugerencias de producto que se
@@ -60,6 +60,16 @@
 //     widgetPublicoLogic.web.js v0.9.2 (claveGrupo).
 //
 // CHANGELOG:
+//   v1.0.1 (13-Sep-2026) — Texto fijo y ajuste a las plantillas reales.
+//     · Línea fija bajo el título: "Puedes comprarlo ahora o pedir
+//       información y adquirirlo en el mismo salón".
+//     · Maquetación alineada con layoutBooking / reminderLayout: mismo
+//       ancho útil (cuerpo de 600 px con 34 px de margen lateral), misma
+//       tipografía, mismo gris de separador (#eeeeee) y mismos colores
+//       de texto (#1a1a1a / #6b6b6b / #4a4a4a).
+//     · El bloque aporta su propio margen lateral, así que el marcador
+//       ${bloqueProductos} va en una celda SIN padding. Cuando no hay
+//       sugerencias la celda queda completamente vacía y no deja hueco.
 //   v1.0.0 (13-Sep-2026) — Versión inicial.
 // =====================================================
 
@@ -368,21 +378,33 @@ function seleccionarPorCuota(idsColeccion, porColeccion, nombresColeccion) {
 // =====================================================
 //
 // HTML de correo: tablas y estilos en línea. Nada de flex, grid ni
-// hojas aparte — Gmail y Outlook los descartan. Paleta idéntica a la
-// del envoltorio de marca de brevoLogic (_buildEmailHtml).
+// hojas aparte — Gmail y Outlook los descartan.
+//
+// Medidas tomadas de las plantillas reales (layoutBooking /
+// reminderLayout): cuerpo de 600 px con 34 px de margen a cada lado,
+// es decir 532 px útiles. Con tres tarjetas y 6 px de separación,
+// cada imagen dispone de ~165 px; por eso el tope es 170 px.
+//
+// El margen lateral lo pone ESTE bloque, no la plantilla. Así el
+// marcador puede ir en una celda sin padding y, cuando no hay
+// sugerencias, esa celda queda vacía del todo y no deja hueco.
+
+const FUENTE = '-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif';
+const TITULO_BLOQUE = 'También te puede interesar';
+const TEXTO_FIJO = 'Puedes comprarlo ahora o pedir información y adquirirlo en el mismo salón';
 
 function tarjeta(f, anchoPct) {
   const precio = f.precio
-    ? `<div style="font-size:15px;font-weight:700;color:#1a1a1a;padding-top:4px;">${esc(f.precio)}</div>`
+    ? `<div style="font-size:15px;font-weight:600;color:#1a1a1a;padding-top:4px;">${esc(f.precio)}</div>`
     : '';
   const categoria = f.categoria
-    ? `<div style="font-size:11px;color:#6b6b6b;text-transform:uppercase;letter-spacing:.4px;padding-bottom:2px;">${esc(f.categoria)}</div>`
+    ? `<div style="font-size:11px;color:#8a8a8a;text-transform:uppercase;letter-spacing:.4px;padding-bottom:3px;">${esc(f.categoria)}</div>`
     : '';
-  return `<td width="${anchoPct}%" valign="top" style="padding:0 6px;">
-  <a href="${esc(f.url)}" style="text-decoration:none;color:#1a1a1a;" target="_blank">
-    <img src="${esc(f.imagen)}" alt="${esc(f.nombre)}" width="170" style="display:block;width:100%;max-width:170px;height:auto;border:0;border-radius:6px;margin:0 auto 8px auto;">
+  return `<td width="${anchoPct}%" valign="top" align="center" style="padding:0 6px;">
+  <a href="${esc(f.url)}" target="_blank" style="text-decoration:none;color:#1a1a1a;">
+    <img src="${esc(f.imagen)}" alt="${esc(f.nombre)}" width="170" style="display:block;width:100%;max-width:170px;height:auto;border:0;border-radius:8px;margin:0 auto 10px auto;">
     ${categoria}
-    <div style="font-size:13px;line-height:1.3;color:#1a1a1a;">${esc(f.nombre)}</div>
+    <div style="font-size:13px;line-height:1.4;color:#2b2b2b;">${esc(f.nombre)}</div>
     ${precio}
     <div style="font-size:12px;color:#6b6b6b;text-decoration:underline;padding-top:6px;">Ver producto</div>
   </a>
@@ -393,12 +415,17 @@ function maquetarBloque(fichas) {
   if (!fichas.length) return '';
   const ancho = Math.floor(100 / fichas.length);
   const celdas = fichas.map(f => tarjeta(f, ancho)).join('\n');
-  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="margin:24px 0 8px 0;border-top:1px solid #e5e5e5;">
-<tr><td style="padding:18px 0 12px 0;font-size:13px;font-weight:700;color:#1a1a1a;text-align:center;letter-spacing:.3px;">TAMBIÉN TE PUEDE INTERESAR</td></tr>
+  return `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="font-family:${FUENTE};">
+<tr><td style="padding:14px 34px 0;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="border-top:1px solid #eeeeee;">
+<tr><td style="padding:20px 0 4px;font-size:16px;font-weight:600;color:#1a1a1a;">${TITULO_BLOQUE}</td></tr>
+<tr><td style="padding:0 0 16px;font-size:14px;color:#4a4a4a;line-height:1.6;">${TEXTO_FIJO}</td></tr>
 <tr><td>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0"><tr>
 ${celdas}
 </tr></table>
+</td></tr>
+</table>
 </td></tr>
 </table>`;
 }
