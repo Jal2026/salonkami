@@ -60,6 +60,10 @@
 //     widgetPublicoLogic.web.js v0.9.2 (claveGrupo).
 //
 // CHANGELOG:
+//   v1.1.2 (13-Sep-2026) — FIX del porcentaje. El redondeo hacia abajo
+//     de la v1.1.1 arrastraba el error de coma flotante: un 10% limpio
+//     (13,50 € a 12,15 €) sale como 9,999999999999998 y se anunciaba
+//     -9%. Se aplica una tolerancia antes de redondear.
 //   v1.1.1 (13-Sep-2026) — El porcentaje se redondea HACIA ABAJO.
 //     Con 23,00 € rebajados a 10,00 €, el redondeo normal anunciaba
 //     -57% cuando la rebaja real es del 56,52%. Anunciar más descuento
@@ -97,7 +101,7 @@
 import { Permissions, webMethod } from 'wix-web-module';
 import wixData from 'wix-data';
 
-const VERSION = '1.1.1';
+const VERSION = '1.1.2';
 const TAG = `[SugerenciasProductos][${VERSION}]`;
 
 const CMS_CATEGORIAS   = 'HairSalonServices';
@@ -209,7 +213,7 @@ function preciosVisibles(prod) {
 
   const hayPromo = Number.isFinite(d) && Number.isFinite(p) && d > 0 && d < p;
   if (hayPromo) {
-    const pct = Math.floor((1 - (d / p)) * 100);
+    const pct = Math.floor(((1 - (d / p)) * 100) + 1e-9);
     return {
       precio: fmtDesc || `${d} ${moneda}`.trim(),
       precioAnterior: fmt || `${p} ${moneda}`.trim(),
