@@ -4,7 +4,7 @@
 // Página: Recepción | Tienda Productos (renombrada
 // internamente a "Alta y Edición Productos")
 // Elemento: #widgetTienda (HtmlComponent)
-// Versión: 3.6
+// Versión: 3.7
 // =====================================================
 // v1.4: + metodoPago, generarFacturaProducto, obtenerHistorialVentas
 // v2.0: + edición productos (tiendaEdicionLogic.web.js)
@@ -86,6 +86,11 @@
 //      incluido en el reporte de errores parciales.
 // =====================================================
 
+// v3.7 (13 Sep 2026): la promoción viaja como {tipo, valor}, donde
+//      tipo es 'PERCENT' o 'AMOUNT'. Antes se mandaba solo el precio
+//      final de venta y el backend lo traducía siempre a importe.
+//      El backend (v1.4.2) sigue aceptando la forma antigua.
+//
 // v3.6 (13 Sep 2026): + PRECIO PROMOCIONAL.
 //      · NUEVOS imports: activarPromocionProducto,
 //        desactivarPromocionProducto (tiendaEdicionLogic v1.4.1).
@@ -554,13 +559,13 @@ $w.onReady(function () {
   // la rebaja y escribe el descuento; el precio original no se toca.
   async function activarPromocionHandler(payload) {
     try {
-      const { productId, precioPromocional } = payload || {};
+      const { productId, tipo, valor } = payload || {};
       if (!productId) {
         widget.postMessage({ type: 'promocionError', payload: { error: 'productId requerido' } });
         return;
       }
 
-      const result = await activarPromocionProducto(productId, precioPromocional);
+      const result = await activarPromocionProducto(productId, { tipo, valor });
       if (!result.ok) {
         widget.postMessage({ type: 'promocionError', payload: { productId, error: result.error } });
         return;
@@ -571,7 +576,9 @@ $w.onReady(function () {
         payload: {
           productId,
           precioAnterior: result.precioAnterior,
-          precioPromocional: result.precioPromocional
+          precioPromocional: result.precioPromocional,
+          tipo: result.tipo,
+          valor: result.valor
         }
       });
 
