@@ -60,6 +60,10 @@
 //     widgetPublicoLogic.web.js v0.9.2 (claveGrupo).
 //
 // CHANGELOG:
+//   v1.1.1 (13-Sep-2026) — El porcentaje se redondea HACIA ABAJO.
+//     Con 23,00 € rebajados a 10,00 €, el redondeo normal anunciaba
+//     -57% cuando la rebaja real es del 56,52%. Anunciar más descuento
+//     del que hay es un problema con el cliente delante. Ahora sale -56%.
 //   v1.1.0 (13-Sep-2026) — Precio promocional visible + invalidación de
 //     caché.
 //     · La tarjeta pinta el precio anterior TACHADO en gris y el precio
@@ -93,7 +97,7 @@
 import { Permissions, webMethod } from 'wix-web-module';
 import wixData from 'wix-data';
 
-const VERSION = '1.1.0';
+const VERSION = '1.1.1';
 const TAG = `[SugerenciasProductos][${VERSION}]`;
 
 const CMS_CATEGORIAS   = 'HairSalonServices';
@@ -205,7 +209,7 @@ function preciosVisibles(prod) {
 
   const hayPromo = Number.isFinite(d) && Number.isFinite(p) && d > 0 && d < p;
   if (hayPromo) {
-    const pct = Math.round((1 - (d / p)) * 100);
+    const pct = Math.floor((1 - (d / p)) * 100);
     return {
       precio: fmtDesc || `${d} ${moneda}`.trim(),
       precioAnterior: fmt || `${p} ${moneda}`.trim(),
