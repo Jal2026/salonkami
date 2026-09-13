@@ -2,7 +2,7 @@
 // KAMISUITE - Tienda Productos (Backend)
 // =====================================================
 // Archivo: tiendaProductos.web.js
-// Versión: 1.5.15
+// Versión: 1.5.16
 // =====================================================
 // v1.1: wixData Stores/Products + generalInfo pickup
 // v1.2: + contactos + buyerInfo + addPayments (order visible)
@@ -81,6 +81,13 @@
 //       NO se tocan registrarVenta, generarFacturaProducto,
 //       obtenerHistorialVentas, cargarContactosTienda ni el bloque
 //       CMS-first de PaymentReservations.
+// v1.5.16 (13 Sep 2026): + descuentoPct en el listado. El porcentaje que
+//         se enseña se toma del descuento guardado cuando Wix lo tiene en
+//         PERCENT, en vez de deducirlo de los precios: con precio 19,85 y
+//         un 10%, Wix cobra 17,87 y la rebaja calculada da 9,97, que se
+//         enseñaba como -9%. En V1 el descuento vive en el PRODUCTO, así
+//         que ese mismo porcentaje vale para todas sus variantes.
+//
 // v1.5.15 (13 Sep 2026): PRECIO PROMOCIONAL EN EL TPV.
 //         Hasta ahora la caja cobraba SIEMPRE `price`, el precio
 //         original, aunque el producto estuviera de oferta en la tienda:
@@ -169,7 +176,7 @@ import { invoices } from 'wix-billing-backend';
 import { getProductVariants } from 'wix-stores-backend';
 
 const TAG = '[TiendaProductos]';
-const VERSION = "1.5.15";
+const VERSION = "1.5.16";
 
 // AppId de Wix Stores para catalogReference en eCommerce
 const STORES_APP_ID = '215238eb-22a5-4c36-9e7b-e7c08025e04e';
@@ -234,6 +241,21 @@ function hayOfertaReal(precio, precioRebajado) {
   const p = Number(precio);
   const d = Number(precioRebajado);
   return Number.isFinite(p) && Number.isFinite(d) && d > 0 && d < p;
+}
+
+// v1.5.16 — Porcentaje que se ENSEÑA. Si Wix lo tiene guardado como
+// PERCENT, ese es el número. Si está en euros, se deduce truncando, con
+// tolerancia para el error de coma flotante.
+function porcentajeDescuento(precio, precioDescontado, discount) {
+  const tipo = (discount && discount.type) ? String(discount.type).toUpperCase() : '';
+  if (tipo === 'PERCENT') {
+    const v = Number(discount.value);
+    if (Number.isFinite(v) && v > 0 && v < 100) return Math.round(v * 100) / 100;
+  }
+  const p = Number(precio);
+  const d = Number(precioDescontado);
+  if (!Number.isFinite(p) || !Number.isFinite(d) || p <= 0 || d <= 0 || d >= p) return 0;
+  return Math.floor(((1 - (d / p)) * 100) + 1e-9);
 }
 
 function normalizarVariante(v, precioProducto) {
@@ -396,6 +418,9 @@ export const listarProductos = webMethod(
           precioOriginal: prod.price,
           formattedPrecioOriginal: prod.formattedPrice || '',
           enPromocion: enOfertaProd,
+          // v1.5.16: porcentaje ya resuelto. Vale también para las
+          // variantes: en V1 el descuento es del producto.
+          descuentoPct: porcentajeDescuento(prod.price, prod.discountedPrice, prod.discount),
           mainMedia: prod.mainMedia || '',
           sku: prod.sku || '',
           inStock: prod.inStock !== false,
