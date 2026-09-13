@@ -2,7 +2,7 @@
 // KAMISUITE - Edición Catálogo Productos (Backend)
 // =====================================================
 // Archivo: tiendaEdicionLogic.web.js
-// Versión: 1.4.2
+// Versión: 1.4.3
 // =====================================================
 // v1.0.0: Versión inicial — 7 funciones CRUD productos
 // v1.0.1: FIX brand minLength + createCollection wix-stores.v2
@@ -227,6 +227,19 @@
 //           leyendo los bloques desde la collection Stores/Products,
 //           que es de solo lectura y por eso nunca se escribe ahí).
 //         · Sin cambios en stock, coste, imágenes ni categorías.
+// v1.4.3 (13 Sep 2026): el PORCENTAJE que se enseña deja de deducirse
+//         de los precios cuando Wix lo tiene guardado.
+//         Caso real: precio 19,85 con un 10%. Wix redondea el precio de
+//         venta a 17,87, y sobre ese precio la rebaja es del 9,97%, que
+//         al truncar sale -9%. El salón pone 10, el panel de Wix dice 10
+//         y el cliente leía -9%. Le pasa a todo precio que no divida
+//         limpio, o sea a medio catálogo.
+//         Ahora: si el descuento está grabado como PERCENT, ese es el
+//         número que se enseña. Solo se calcula cuando está grabado en
+//         euros, que es cuando no hay porcentaje que leer.
+//         El listado devuelve `descuentoPct` ya resuelto, para que la
+//         ficha, la tarjeta y los correos digan todos lo mismo.
+//
 // v1.4.2 (13 Sep 2026): la promoción se puede expresar en PORCENTAJE
 //         o en IMPORTE, como en el panel de Wix. Confirmado en el log de
 //         producción del 13-sep: Wix devuelve discount {type,value} y
@@ -361,7 +374,7 @@ import { mediaManager } from 'wix-media-backend';
 import { invalidarCacheCatalogo } from 'backend/sugerenciasProductosLogic.web.js';
 
 const TAG = '[TiendaEdicion]';
-const VERSION = '1.4.2';
+const VERSION = '1.4.3';
 
 // =====================================================
 // UTILIDAD: Detectar MIME type del base64 o extensión
@@ -650,6 +663,8 @@ export const listarProductosParaEdicion = webMethod(
           // para abrir con el tipo real, venga de donde venga la oferta.
           discount: prod.discount || null,
           enPromocion: enPromocionReal(prod.price, prod.discountedPrice),
+          // v1.4.3: porcentaje ya resuelto. Nadie lo recalcula aguas abajo.
+          descuentoPct: porcentajeDescuento(prod.price, prod.discountedPrice, prod.discount),
           mainMedia: prod.mainMedia || '',
           sku: prod.sku || '',
           inStock: prod.inStock !== false,
@@ -908,6 +923,25 @@ function enPromocionReal(precio, precioDescontado) {
   const p = Number(precio);
   const d = Number(precioDescontado);
   return Number.isFinite(p) && Number.isFinite(d) && d > 0 && d < p;
+}
+
+// v1.4.3 — Porcentaje que se ENSEÑA al cliente.
+// Si Wix tiene guardado el descuento como PERCENT, se usa ese número tal
+// cual: es lo que escribió el salón y lo que muestra el panel de Wix.
+// Solo se deduce de los precios cuando el descuento está en euros, y ahí
+// se trunca (nunca prometer más rebaja de la que hay) con una tolerancia
+// para el error de coma flotante: 23,00 a 20,70 da 9,999999999999998 y
+// sin ella se pintaría -9% en vez de -10%.
+function porcentajeDescuento(precio, precioDescontado, discount) {
+  const tipo = (discount && discount.type) ? String(discount.type).toUpperCase() : '';
+  if (tipo === 'PERCENT') {
+    const v = Number(discount.value);
+    if (Number.isFinite(v) && v > 0 && v < 100) return Math.round(v * 100) / 100;
+  }
+  const p = Number(precio);
+  const d = Number(precioDescontado);
+  if (!Number.isFinite(p) || !Number.isFinite(d) || p <= 0 || d <= 0 || d >= p) return 0;
+  return Math.floor(((1 - (d / p)) * 100) + 1e-9);
 }
 
 // Redondeo a dos decimales sin arrastrar el error del binario.
