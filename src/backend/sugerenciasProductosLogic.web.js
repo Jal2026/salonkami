@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  sugerenciasProductosLogic.web.js — Sugerencias de producto     ║
-// ║  KAMISUITE · v1.1.2 · 13 Septiembre 2026                        ║
+// ║  KAMISUITE · v1.2.0 · 13 Septiembre 2026                        ║
 // ╚══════════════════════════════════════════════════════════════════╝
 //
 // FUNCIÓN: construye el bloque HTML de sugerencias de producto que se
@@ -60,6 +60,12 @@
 //     widgetPublicoLogic.web.js v0.9.2 (claveGrupo).
 //
 // CHANGELOG:
+//   v1.2.0 (13-Sep-2026) — El porcentaje del anuncio se lee del descuento
+//     guardado en vez de deducirse de los precios. Con precio 19,85 y un
+//     10%, Wix cobra 17,87 y la rebaja real es del 9,97: el correo decía
+//     -9% mientras el salón había puesto 10. Ahora, si el descuento está
+//     grabado como PERCENT, ese es el número que se anuncia; solo se
+//     calcula cuando está grabado en euros.
 //   v1.1.2 (13-Sep-2026) — FIX del porcentaje. El redondeo hacia abajo
 //     de la v1.1.1 arrastraba el error de coma flotante: un 10% limpio
 //     (13,50 € a 12,15 €) sale como 9,999999999999998 y se anunciaba
@@ -101,7 +107,7 @@
 import { Permissions, webMethod } from 'wix-web-module';
 import wixData from 'wix-data';
 
-const VERSION = '1.1.2';
+const VERSION = '1.2.0';
 const TAG = `[SugerenciasProductos][${VERSION}]`;
 
 const CMS_CATEGORIAS   = 'HairSalonServices';
@@ -203,6 +209,23 @@ function enlaceAbsoluto(base, ruta) {
 //   descuentoPct   → entero, calculado. 0 cuando no hay promoción.
 // La promoción se considera real solo si discountedPrice es un número
 // mayor que 0 y MENOR que price. Es el mismo guardarraíl de v1.0.1.
+// v1.2.0 — Porcentaje que se ANUNCIA. Si Wix tiene el descuento guardado
+// como PERCENT, se anuncia ese número: es el que puso el salón y el que
+// muestra su panel. Solo se deduce de los precios cuando el descuento
+// está en euros, y entonces se trunca —nunca prometer más rebaja de la
+// que hay— con tolerancia para el error de coma flotante.
+function porcentajeDescuento(precio, precioDescontado, discount) {
+  const tipo = (discount && discount.type) ? String(discount.type).toUpperCase() : '';
+  if (tipo === 'PERCENT') {
+    const v = Number(discount.value);
+    if (Number.isFinite(v) && v > 0 && v < 100) return Math.round(v * 100) / 100;
+  }
+  const p = Number(precio);
+  const d = Number(precioDescontado);
+  if (!Number.isFinite(p) || !Number.isFinite(d) || p <= 0 || d <= 0 || d >= p) return 0;
+  return Math.floor(((1 - (d / p)) * 100) + 1e-9);
+}
+
 function preciosVisibles(prod) {
   const fmtDesc = String(prod.formattedDiscountedPrice || '').trim();
   const fmt = String(prod.formattedPrice || '').trim();
@@ -213,7 +236,7 @@ function preciosVisibles(prod) {
 
   const hayPromo = Number.isFinite(d) && Number.isFinite(p) && d > 0 && d < p;
   if (hayPromo) {
-    const pct = Math.floor(((1 - (d / p)) * 100) + 1e-9);
+    const pct = porcentajeDescuento(p, d, prod.discount);
     return {
       precio: fmtDesc || `${d} ${moneda}`.trim(),
       precioAnterior: fmt || `${p} ${moneda}`.trim(),
@@ -443,7 +466,7 @@ function tarjeta(f, anchoPct) {
   // promocional en rojo con su etiqueta. Sin promoción, idéntico a v1.0.1.
   const hayPromo = !!f.precioAnterior;
   const etiquetaPct = (f.descuentoPct > 0)
-    ? ` <span style="display:inline-block;background:${ROJO_PROMO};color:#ffffff;font-size:11px;font-weight:700;line-height:1;padding:3px 5px;border-radius:3px;">-${f.descuentoPct}%</span>`
+    ? ` <span style="display:inline-block;background:${ROJO_PROMO};color:#ffffff;font-size:11px;font-weight:700;line-height:1;padding:3px 5px;border-radius:3px;">-${String(f.descuentoPct).replace('.', ',')}%</span>`
     : '';
   const anterior = hayPromo
     ? `<div style="font-size:12px;color:#8a8a8a;padding-top:4px;"><s style="text-decoration:line-through;">${esc(f.precioAnterior)}</s></div>`
