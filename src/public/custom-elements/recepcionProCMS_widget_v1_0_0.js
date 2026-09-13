@@ -1,6 +1,16 @@
 /* =====================================================================
  * KAMISUITE — Widget Nueva Recepción PRO (CMS-first)
  * Custom Element: <recepcion-pro-cms>
+ * VERSION: 1.1.113  ·  El porcentaje de la oferta se lee, no se deduce
+ *
+ *   El backend (tiendaProductos v1.5.16) manda `descuentoPct` ya
+ *   resuelto: cuando Wix tiene el descuento guardado en PERCENT, ese es
+ *   el número. Deducirlo de los precios engañaba en cuanto el precio no
+ *   dividía limpio — con 19,85 y un 10%, Wix cobra 17,87 y la rebaja
+ *   calculada da 9,97, que se pintaba como -9%.
+ *   En V1 el descuento es del PRODUCTO, así que sus variantes enseñan
+ *   ese mismo porcentaje.
+ *
  * VERSION: 1.1.112  ·  Precio promocional del producto en la cita
  *
  *   El catálogo que llega del backend (tiendaProductos v1.5.15) trae ya
@@ -2044,7 +2054,7 @@
 (function () {
   'use strict';
 
-  const TAG = '[RecepcionProCMS-Widget v1.1.112]';
+  const TAG = '[RecepcionProCMS-Widget v1.1.113]';
 
   // ─── helpers ───
   function esc(s) {
@@ -8042,16 +8052,22 @@ button { font-family: inherit; cursor: pointer; }
     // v1.1.112 — Precio anterior tachado + etiqueta de rebaja.
     // Devuelve {antes, chip}; ambos vacíos si el item no está de oferta.
     // `price` ya viene rebajado del backend: aquí no se recalcula nada.
-    _promoLinea(item) {
+    // v1.1.113 — pctBackend es el `descuentoPct` del producto padre. Si no
+    // llega (listado antiguo), se deduce de los precios como respaldo,
+    // truncando y con tolerancia para el error de coma flotante.
+    _promoLinea(item, pctBackend) {
       const vacio = { antes: '', chip: '' };
       if (!item || item.enPromocion !== true) return vacio;
       const anterior = Number(item.precioOriginal);
       const actual = Number(item.price);
       if (!isFinite(anterior) || !isFinite(actual) || actual <= 0 || anterior <= actual) return vacio;
-      const pct = Math.floor(((1 - (actual / anterior)) * 100) + 1e-9);
+      let pct = Number(pctBackend);
+      if (!isFinite(pct) || pct <= 0) {
+        pct = Math.floor(((1 - (actual / anterior)) * 100) + 1e-9);
+      }
       return {
         antes: `<span class="pd-price-old">${anterior}€</span>`,
-        chip: pct > 0 ? `<span class="pd-promo-chip">-${pct}%</span>` : ''
+        chip: pct > 0 ? `<span class="pd-promo-chip">-${String(pct).replace('.', ',')}%</span>` : ''
       };
     }
 
@@ -8107,7 +8123,7 @@ button { font-family: inherit; cursor: pointer; }
                     data-variant-id="${esc(v.variantId)}"
                     data-variant-label="${esc(v.label)}">
                   <span class="pd-variant-label">↳ ${esc(v.label)}${enTag}${vStockTag}</span>
-                  <span class="pd-variant-price">${this._promoLinea(v).antes}${Number(v.price) || 0}€${this._promoLinea(v).chip}</span>
+                  <span class="pd-variant-price">${this._promoLinea(v, p.descuentoPct).antes}${Number(v.price) || 0}€${this._promoLinea(v, p.descuentoPct).chip}</span>
                 </div>`;
               }
             }
@@ -8119,7 +8135,7 @@ button { font-family: inherit; cursor: pointer; }
             const stockTag = sinStock ? '<span style="color:#b91c1c;font-size:9px;font-weight:700;letter-spacing:.5px;margin-left:5px;">SIN STOCK</span>' : '';
             listaHTML += `<div class="pd-item ${disabled ? 'pd-disabled' : ''}" data-prod-id="${esc(p.id)}" data-prod-name="${esc(p.name)}" data-prod-price="${Number(p.price) || 0}">
               <span class="pd-item-name">${esc(p.name)}${enTag}${stockTag}</span>
-              <span class="pd-item-price">${this._promoLinea(p).antes}${Number(p.price) || 0}€${this._promoLinea(p).chip}</span>
+              <span class="pd-item-price">${this._promoLinea(p, p.descuentoPct).antes}${Number(p.price) || 0}€${this._promoLinea(p, p.descuentoPct).chip}</span>
             </div>`;
           }
         }
