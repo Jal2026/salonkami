@@ -60,6 +60,23 @@
 //     widgetPublicoLogic.web.js v0.9.2 (claveGrupo).
 //
 // CHANGELOG:
+//   v1.1.0 (13-Sep-2026) — Precio promocional visible + invalidación de
+//     caché.
+//     · La tarjeta pinta el precio anterior TACHADO en gris y el precio
+//       promocional en rojo, con una etiqueta de porcentaje calculada
+//       sobre price/discountedPrice. Sin descuento, la tarjeta queda
+//       exactamente igual que en v1.0.1 (precio único en #1a1a1a).
+//     · El porcentaje NO se configura en ningún sitio: sale de los dos
+//       precios que ya devuelve Stores/Products. Cero hardcoding.
+//     · `precioVisible` (una cadena) pasa a `preciosVisibles` (precio,
+//       precioAnterior, descuentoPct). El campo `precio` de la ficha
+//       conserva el mismo significado que antes.
+//     · NEW `invalidarCacheCatalogo()` — el editor de productos la llama
+//       al activar o desactivar una promoción, para que el correo no
+//       anuncie el precio viejo mientras la caché siga caliente.
+//     · FIX: la constante VERSION decía '1.0.0' mientras la cabecera
+//       decía v1.0.1. Por eso el log del timeout salió etiquetado como
+//       [1.0.0]. Corregido.
 //   v1.0.1 (13-Sep-2026) — Texto fijo y ajuste a las plantillas reales.
 //     · Línea fija bajo el título: "Puedes comprarlo ahora o pedir
 //       información y adquirirlo en el mismo salón".
@@ -76,7 +93,7 @@
 import { Permissions, webMethod } from 'wix-web-module';
 import wixData from 'wix-data';
 
-const VERSION = '1.0.0';
+const VERSION = '1.1.0';
 const TAG = `[SugerenciasProductos][${VERSION}]`;
 
 const CMS_CATEGORIAS   = 'HairSalonServices';
@@ -172,15 +189,32 @@ function enlaceAbsoluto(base, ruta) {
   try { return encodeURI(base + ruta); } catch (_) { return base + ruta; }
 }
 
-function precioVisible(prod) {
+// v1.1.0: devuelve los DOS precios en vez de una sola cadena.
+//   precio         → lo que paga el cliente hoy (promocional si lo hay).
+//   precioAnterior → solo cuando hay promoción real. Se pinta tachado.
+//   descuentoPct   → entero, calculado. 0 cuando no hay promoción.
+// La promoción se considera real solo si discountedPrice es un número
+// mayor que 0 y MENOR que price. Es el mismo guardarraíl de v1.0.1.
+function preciosVisibles(prod) {
   const fmtDesc = String(prod.formattedDiscountedPrice || '').trim();
   const fmt = String(prod.formattedPrice || '').trim();
+  const moneda = String(prod.currency || '').trim();
   const p = Number(prod.price);
   const d = Number(prod.discountedPrice);
-  if (fmtDesc && Number.isFinite(d) && Number.isFinite(p) && d > 0 && d < p) return fmtDesc;
-  if (fmt) return fmt;
-  if (Number.isFinite(p) && p > 0) return `${p} ${String(prod.currency || '').trim()}`.trim();
-  return '';
+  const vacio = { precio: '', precioAnterior: '', descuentoPct: 0 };
+
+  const hayPromo = Number.isFinite(d) && Number.isFinite(p) && d > 0 && d < p;
+  if (hayPromo) {
+    const pct = Math.round((1 - (d / p)) * 100);
+    return {
+      precio: fmtDesc || `${d} ${moneda}`.trim(),
+      precioAnterior: fmt || `${p} ${moneda}`.trim(),
+      descuentoPct: pct > 0 ? pct : 0
+    };
+  }
+  if (fmt) return { ...vacio, precio: fmt };
+  if (Number.isFinite(p) && p > 0) return { ...vacio, precio: `${p} ${moneda}`.trim() };
+  return vacio;
 }
 
 // Baraja in-place (Fisher-Yates).
@@ -300,7 +334,7 @@ async function getCatalogo() {
       : [];
     if (!ids.length) continue;
 
-    const ficha = { nombre, imagen, url, precio: precioVisible(prod) };
+    const ficha = { nombre, imagen, url, ...preciosVisibles(prod) };
     utiles++;
 
     for (const cid of ids) {
@@ -392,10 +426,22 @@ function seleccionarPorCuota(idsColeccion, porColeccion, nombresColeccion) {
 const FUENTE = '-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif';
 const TITULO_BLOQUE = 'También te puede interesar';
 const TEXTO_FIJO = 'Puedes comprarlo ahora o pedir información y adquirirlo en el mismo salón';
+// v1.1.0: rojo de oferta. Decisión de Jal (13-sep-2026): en el correo el
+// precio promocional va en rojo, la convención comercial.
+const ROJO_PROMO = '#cc0000';
 
 function tarjeta(f, anchoPct) {
+  // v1.1.0: con promoción, el precio anterior va tachado encima y el
+  // promocional en rojo con su etiqueta. Sin promoción, idéntico a v1.0.1.
+  const hayPromo = !!f.precioAnterior;
+  const etiquetaPct = (f.descuentoPct > 0)
+    ? ` <span style="display:inline-block;background:${ROJO_PROMO};color:#ffffff;font-size:11px;font-weight:700;line-height:1;padding:3px 5px;border-radius:3px;">-${f.descuentoPct}%</span>`
+    : '';
+  const anterior = hayPromo
+    ? `<div style="font-size:12px;color:#8a8a8a;padding-top:4px;"><s style="text-decoration:line-through;">${esc(f.precioAnterior)}</s></div>`
+    : '';
   const precio = f.precio
-    ? `<div style="font-size:15px;font-weight:600;color:#1a1a1a;padding-top:4px;">${esc(f.precio)}</div>`
+    ? `<div style="font-size:15px;font-weight:700;color:${hayPromo ? ROJO_PROMO : '#1a1a1a'};padding-top:${hayPromo ? '2px' : '4px'};">${esc(f.precio)}${etiquetaPct}</div>`
     : '';
   const categoria = f.categoria
     ? `<div style="font-size:11px;color:#8a8a8a;text-transform:uppercase;letter-spacing:.4px;padding-bottom:3px;">${esc(f.categoria)}</div>`
@@ -405,6 +451,7 @@ function tarjeta(f, anchoPct) {
     <img src="${esc(f.imagen)}" alt="${esc(f.nombre)}" width="170" style="display:block;width:100%;max-width:170px;height:auto;border:0;border-radius:8px;margin:0 auto 10px auto;">
     ${categoria}
     <div style="font-size:13px;line-height:1.4;color:#2b2b2b;">${esc(f.nombre)}</div>
+    ${anterior}
     ${precio}
     <div style="font-size:12px;color:#6b6b6b;text-decoration:underline;padding-top:6px;">Ver producto</div>
   </a>
@@ -447,6 +494,30 @@ export const construirBloqueProductos = webMethod(
   async ({ group } = {}) => {
     const resultado = await conTimeout(_construir(group), TIMEOUT_MS, 'construirBloqueProductos');
     return resultado || '';
+  }
+);
+
+/**
+ * v1.1.0 — Tira la caché del catálogo.
+ *
+ * La llama `tiendaEdicionLogic` al activar o desactivar una promoción:
+ * sin esto, el correo seguiría anunciando el precio anterior hasta que
+ * la caché caducara sola.
+ *
+ * NUNCA lanza. Si falla, el correo sigue saliendo con datos cacheados.
+ */
+export const invalidarCacheCatalogo = webMethod(
+  Permissions.SiteMember,
+  async () => {
+    try {
+      _cache = null;
+      _cacheTs = 0;
+      console.log(`${TAG} ♻️ Caché de catálogo invalidada`);
+      return { ok: true, version: VERSION };
+    } catch (e) {
+      console.warn(`${TAG} ⚠️ invalidarCacheCatalogo: ${e.message}`);
+      return { ok: false, error: e.message, version: VERSION };
+    }
   }
 );
 
