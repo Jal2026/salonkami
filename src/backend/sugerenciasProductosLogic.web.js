@@ -1,6 +1,6 @@
 // ╔══════════════════════════════════════════════════════════════════╗
 // ║  sugerenciasProductosLogic.web.js — Sugerencias de producto     ║
-// ║  KAMISUITE · v1.0.1 · 13 Septiembre 2026                        ║
+// ║  KAMISUITE · v1.1.2 · 13 Septiembre 2026                        ║
 // ╚══════════════════════════════════════════════════════════════════╝
 //
 // FUNCIÓN: construye el bloque HTML de sugerencias de producto que se
