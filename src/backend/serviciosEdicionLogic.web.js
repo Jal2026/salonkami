@@ -1,8 +1,30 @@
 // =====================================================
 // KAMISUITE - Edición de Servicios Backend
 // =====================================================
-// VERSION: 1.13.0
-// FECHA: 20 de agosto de 2026
+// VERSION: 1.15.0
+// FECHA: 23 de octubre de 2026
+//
+// v1.15.0 — SERVICIO ENLAZADO. Se conecta `servicioEnlazado` (Texto,
+//   ServiceCatalog): setupUid del servicio que empieza A LA VEZ que este,
+//   con su propio profesional y su propio cobro (recepcionProLogic v1.0.62,
+//   widgetPublicoLogic v0.14.0). Caso Hair-Times: spa capilar + spa masaje
+//   de EMY. Mismo patrón que smartPricing: leer (listarServiciosCompleto),
+//   actualizar (actualizarServicio), crear (crearServicioCatalogo) y
+//   devolverlo para el refresco local. Vacío = sin enlace. Un servicio no
+//   puede enlazarse consigo mismo: se guarda vacío. Duplicar ya copia todos
+//   los campos. Widget pareja: edicion servicios v1.16.0.
+//   Cero cambios en el resto de campos ni en ninguna otra función.
+//
+// v1.14.0 — SMART PRICING POR SERVICIO. Se conecta `smartPricing`
+//   (Booleano, ServiceCatalog), mismo patrón que descuentoActivo:
+//   leer (listarServiciosCompleto), actualizar (actualizarServicio) y crear
+//   (crearServicioCatalogo). Duplicar ya copia todos los campos.
+//   Lo consume smartPricingLogic v1.0.5: solo los servicios con
+//   smartPricing === true reciben ofertas en la reserva online (Jal: en
+//   los servicios baratos no merece la pena; hay que incentivar los caros).
+//   Widget pareja: edicion servicios v1.15.10.
+//   Corrección de deuda: el TAG decía 1.11.7; ahora 1.14.0.
+//   Cero cambios en el resto de campos ni en ninguna otra función.
 //
 // v1.13.0 — BONOS: plazo MÁXIMO por uso, campo nuevo y CONVIVIENDO con el
 //   mínimo. Se conecta bonusMaxIntervalDays (ServiceCatalog), entero >= 0,
@@ -159,7 +181,7 @@ import { Permissions, webMethod } from 'wix-web-module';
 import { mediaManager } from 'wix-media-backend';
 import wixData from 'wix-data';
 
-const TAG = '[ServiciosEdicion][1.11.7]';
+const TAG = '[ServiciosEdicion][1.15.0]';
 const CMS_LOG = 'ChangeLogServices';
 const CMS_CATALOG = 'ServiceCatalog';
 const CMS_STAFF = 'StaffConfig';
@@ -464,6 +486,10 @@ export const listarServiciosCompleto = webMethod(
           descripcionTour: c.descripcionTour || '',
           descuentoActivo: c.descuentoActivo === true,
           descuentoPromo: (typeof c.descuentoPromo === 'number') ? c.descuentoPromo : null,
+          // v1.14.0 — smart pricing por servicio
+          smartPricing: c.smartPricing === true,
+          // v1.15.0 — servicio enlazado (setupUid, '' = sin enlace)
+          servicioEnlazado: c.servicioEnlazado || '',
           // v1.11.6 — cobro por peso + bonos
           cobroporPeso: c.cobroporPeso === true,
           precioGramo: (typeof c.precioGramo === 'number') ? c.precioGramo : null,
@@ -540,7 +566,11 @@ export const actualizarServicio = webMethod(
       bonusValidityDays,
       bonusUseIntervalDays,
       // v1.13.0 — plazo MÁXIMO por uso
-      bonusMaxIntervalDays
+      bonusMaxIntervalDays,
+      // v1.14.0 — smart pricing por servicio
+      smartPricing,
+      // v1.15.0 — servicio enlazado
+      servicioEnlazado
     } = payload;
 
     try {
@@ -598,6 +628,13 @@ export const actualizarServicio = webMethod(
       if (vistaEnTour !== undefined) registro.vistaEnTour = !!vistaEnTour;
       if (descripcionTour !== undefined) registro.descripcionTour = descripcionTour || '';
       if (descuentoActivo !== undefined) registro.descuentoActivo = !!descuentoActivo;
+      // v1.14.0 — smart pricing por servicio
+      if (smartPricing !== undefined) registro.smartPricing = !!smartPricing;
+      // v1.15.0 — servicio enlazado. Nunca consigo mismo.
+      if (servicioEnlazado !== undefined) {
+        const uidEnl = String(servicioEnlazado || '').trim();
+        registro.servicioEnlazado = (uidEnl && uidEnl !== registro.setupUid) ? uidEnl : '';
+      }
       if (descuentoPromo !== undefined) {
         if (descuentoPromo === null || descuentoPromo === '') {
           registro.descuentoPromo = null;
@@ -717,6 +754,10 @@ export const actualizarServicio = webMethod(
           descripcionTour: registro.descripcionTour || '',
           descuentoActivo: registro.descuentoActivo === true,
           descuentoPromo: (typeof registro.descuentoPromo === 'number') ? registro.descuentoPromo : null,
+          // v1.14.0
+          smartPricing: registro.smartPricing === true,
+          // v1.15.0
+          servicioEnlazado: registro.servicioEnlazado || '',
           // v1.11.6
           cobroporPeso: registro.cobroporPeso === true,
           precioGramo: (typeof registro.precioGramo === 'number') ? registro.precioGramo : null,
@@ -779,6 +820,10 @@ export const crearServicioCatalogo = webMethod(
       bonusUseIntervalDays,
       // v1.13.0 — plazo MÁXIMO por uso
       bonusMaxIntervalDays,
+      // v1.14.0 — smart pricing por servicio
+      smartPricing,
+      // v1.15.0 — servicio enlazado
+      servicioEnlazado,
       base64Data,
       fileName,
       mimeType
@@ -823,6 +868,11 @@ export const crearServicioCatalogo = webMethod(
         vistaEnTour: vistaEnTour === true,
         descripcionTour: descripcionTour || '',
         descuentoActivo: descuentoActivo === true,
+        // v1.14.0 — smart pricing por servicio
+        smartPricing: smartPricing === true,
+        // v1.15.0 — servicio enlazado (el setupUid nuevo no existe aún: no
+        // puede ser él mismo)
+        servicioEnlazado: String(servicioEnlazado || '').trim(),
         descuentoPromo: (() => {
           if (descuentoPromo === undefined || descuentoPromo === null || descuentoPromo === '') return null;
           const n = Number(descuentoPromo);
@@ -927,6 +977,10 @@ export const crearServicioCatalogo = webMethod(
           descripcionTour: inserted.descripcionTour || '',
           descuentoActivo: inserted.descuentoActivo === true,
           descuentoPromo: (typeof inserted.descuentoPromo === 'number') ? inserted.descuentoPromo : null,
+          // v1.14.0
+          smartPricing: inserted.smartPricing === true,
+          // v1.15.0
+          servicioEnlazado: inserted.servicioEnlazado || '',
           // v1.11.6
           cobroporPeso: inserted.cobroporPeso === true,
           precioGramo: (typeof inserted.precioGramo === 'number') ? inserted.precioGramo : null,

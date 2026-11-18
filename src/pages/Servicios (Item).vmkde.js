@@ -1,8 +1,53 @@
 // =====================================================
 // KAMISUITE — Page Code: /reservar/{slug}
 // =====================================================
-// VERSION: 0.3.6
-// FECHA: 26 de agosto de 2026
+// VERSION: 0.4.3
+// FECHA: 23 de octubre de 2026
+//
+// v0.4.3:
+//   + SERVICIO ENLAZADO. 'reservar' devuelve además `enlazada`
+//     { reservaId, staffName, label, precioTotal, duracionTotal } cuando
+//     crearReservaPublica v0.14.0 crea también la cita enlazada (null si
+//     no hay). El widget (bundle v2.2.0) la usa en la pantalla de reserva
+//     confirmada. Nada más cambia.
+//
+// v0.4.2:
+//   + SMART PRICING (fase 1). Puente de las ofertas por dia y hora entre
+//     el widget (bundle v2.1.2) y widgetPublicoLogic v0.13.0:
+//       · 'pedir-huecos' devuelve ademas `ofertas` { 'HH:MM': pct } y
+//         `smartPricing` { activo, ventanaDias } del dia pedido.
+//       · NUEVO 'pedir-ofertas' → getOfertasDias → atributo
+//         `data-ofertas-response`. Horas libres con oferta de varios dias,
+//         para las insignias de la tira de dias y la propuesta de cambio.
+//       · 'reservar' reenvia `ofertaPct` (lo que la clienta vio) y devuelve
+//         `codigo` del backend ('OFERTA_CAMBIADA' si la oferta ya no vale).
+//     Sin smart pricing encendido todo viaja vacio y el widget se comporta
+//     como en v0.4.1.
+//   ~ TAG sincronizado: seguia diciendo v0.3.6.
+//
+// v0.4.1:
+//   + Solo renumeracion. Contenido identico al 0.4.0 entregado el
+//     30-sep-2026, que colisionaba con otro 0.4.0 entregado el 9-sep-2026.
+//     Ambos partian de 0.3.6 pero con backends distintos detras.
+//
+// v0.4.0:
+//   + LA DURACION DE LA CITA LA MIDE EL SERVIDOR.
+//     El widget (bundle v2.1.0) manda ahora en `pedir-huecos` QUE ha elegido
+//     la clienta —`complementosSetupUid` y `varianteSel`, con el mismo
+//     formato exacto que ya viajaba en `reservar`— y no solo cuantos minutos
+//     cree que dura. Este page code los propaga a getHuecosDisponibles
+//     (widgetPublicoLogic v0.12.0), que mide la cita con el mismo motor que
+//     luego la construye.
+//     Motivo: el front no puede llegar a la duracion real. A un complemento
+//     con proceso propio el motor le anade su bloque de PROCESO encima de la
+//     duracion seca, y al elegir variante el front sustituye toda la
+//     duracion mientras el motor sustituye solo la aplicacion. Caso real
+//     28-sep-2026: tres lineas que suman 90 minutos en pantalla ocupando 170
+//     en la agenda, y una cita creada 17:30-20:20 con cierre a las 20:00.
+//     La respuesta devuelve ademas `durationMin`, la duracion REAL medida,
+//     para que el widget pinte esa y no su propia suma.
+//     `durationMin` se sigue enviando en la peticion por retrocompatibilidad;
+//     el backend lo usa solo si no recibe composicion.
 //
 // v0.3.6:
 //   + IMAGENES REDIMENSIONADAS EN ORIGEN (rendimiento en movil 4G).
@@ -111,10 +156,11 @@ import {
   getProfesionalesPublicos,
   getSalonConfig,
   getHuecosDisponibles,
-  crearReservaPublica
+  crearReservaPublica,
+  getOfertasDias          // v0.4.2 — smart pricing
 } from 'backend/widgetPublicoLogic.web';
 
-const TAG = '[ReservarPage][v0.3.6]';
+const TAG = '[ReservarPage][v0.4.3]';
 
 // v0.3.6 — Tamanos de las variantes redimensionadas de la imagen de servicio.
 // Se corresponden con lo que el bundle pinta realmente:
@@ -318,7 +364,13 @@ function montarCustomElement() {
         // para que el backend calcule el punto de corte a partir del
         // mapeoFases del servicio.
         proExtraId: d.proExtraId || '',
-        principalSetupUid: d.principalSetupUid || ''
+        principalSetupUid: d.principalSetupUid || '',
+        // v0.4.0 — Composicion elegida. Cuando `complementosSetupUid` llega
+        // como array, el backend v0.12.0 mide la duracion real con el motor
+        // de packs y ofrece las horas con ella, ignorando `durationMin`. Si
+        // no llega (widget anterior a v2.1.0), se comporta como en v0.11.12.
+        complementosSetupUid: Array.isArray(d.complementosSetupUid) ? d.complementosSetupUid : [],
+        varianteSel: d.varianteSel || null
       });
       // Devolver al widget vía atributo dedicado.
       // Patrón: cada respuesta tiene un requestId que el widget genera
@@ -328,6 +380,12 @@ function montarCustomElement() {
         fecha: d.fecha,
         proId: d.proId,
         huecos: res?.huecos || [],
+        // v0.4.0 — Duracion REAL con la que el backend ha filtrado estas
+        // horas. El widget la pinta en lugar de su propia suma.
+        durationMin: res?.durationMin,
+        // v0.4.2 — Smart pricing del dia pedido. Vacio si esta apagado.
+        ofertas: (res && res.ofertas && typeof res.ofertas === 'object') ? res.ofertas : {},
+        smartPricing: res?.smartPricing || null,
         ok: !!res?.ok,
         ts: Date.now()   // fuerza re-trigger del attributeChangedCallback
       }));
@@ -338,6 +396,42 @@ function montarCustomElement() {
         proId: d.proId,
         huecos: [],
         ok: false,
+        error: e.message,
+        ts: Date.now()
+      }));
+    }
+  });
+
+  // v0.4.2 — SMART PRICING. Horas libres con oferta de varios dias, para
+  // las insignias de la tira de dias y la propuesta de cambio de hueco.
+  // Mismos parametros que 'pedir-huecos' mas la lista de fechas.
+  widget.on('pedir-ofertas', async (event) => {
+    const d = event?.detail || {};
+    try {
+      const res = await getOfertasDias({
+        fechas: Array.isArray(d.fechas) ? d.fechas : [],
+        proId: d.proId,
+        durationMin: d.durationMin,
+        idStaffPermitidos: Array.isArray(d.idStaffPermitidos) ? d.idStaffPermitidos : [],
+        proExtraId: d.proExtraId || '',
+        principalSetupUid: d.principalSetupUid || '',
+        complementosSetupUid: Array.isArray(d.complementosSetupUid) ? d.complementosSetupUid : [],
+        varianteSel: d.varianteSel || null
+      });
+      widget.setAttribute('data-ofertas-response', JSON.stringify({
+        requestId: d.requestId,
+        ok: !!res?.ok,
+        activo: !!res?.activo,
+        ventanaDias: res?.ventanaDias || 0,
+        dias: (res && res.dias && typeof res.dias === 'object') ? res.dias : {},
+        ts: Date.now()
+      }));
+    } catch (e) {
+      widget.setAttribute('data-ofertas-response', JSON.stringify({
+        requestId: d.requestId,
+        ok: false,
+        activo: false,
+        dias: {},
         error: e.message,
         ts: Date.now()
       }));
@@ -375,7 +469,10 @@ function montarCustomElement() {
         staffExtraId: d.staffExtraId || '',
         contactDetails: d.contactDetails || {},
         memberContactId: d.memberContactId || ctx.memberInfo?.contactId || '',
-        notas: d.notas || ''
+        notas: d.notas || '',
+        // v0.4.2 — Porcentaje de oferta que la clienta vio (0 si ninguno).
+        // El backend lo revalida; la oferta grabada la calcula el servidor.
+        ofertaPct: Number(d.ofertaPct) || 0
       });
       widget.setAttribute('data-reserva-response', JSON.stringify({
         requestId: d.requestId,
@@ -384,6 +481,16 @@ function montarCustomElement() {
         precioTotal: res?.precioTotal || 0,
         fases: res?.fases || [],
         error: res?.ok ? null : (res?.error?.message || 'Error creando reserva'),
+        // v0.4.2 — 'OFERTA_CAMBIADA' cuando la oferta vista ya no vale.
+        codigo: res?.codigo || null,
+        // v0.4.3 — Cita enlazada creada a la vez (null si no hay).
+        enlazada: (res && res.ok && res.enlazada) ? {
+          reservaId: res.enlazada.reservaId || null,
+          staffName: res.enlazada.staffName || '',
+          label: res.enlazada.label || '',
+          precioTotal: res.enlazada.precioTotal || 0,
+          duracionTotal: res.enlazada.duracionTotal || 0
+        } : null,
         ts: Date.now()
       }));
     } catch (e) {

@@ -1,9 +1,169 @@
 // =====================================================
 // KAMISUITE - Backend: Recepción PRO CMS-first
 // =====================================================
-// VERSION: 1.0.59
-// FECHA: 11 de septiembre de 2026
+// VERSION: 1.0.64
+// FECHA: 4 de noviembre de 2026
 // ARCHIVO: backend/recepcionProLogic.web.js
+//
+// v1.0.64: 🕘 SERVICIO ENLAZADO — RECEPCIÓN MIRA EL HORARIO AL ELEGIR LA
+//          PROFESIONAL DE LA CITA ENLAZADA.
+//          Caso Hair-Times: masaje del Body Ritual con EMY y Angela
+//          asignadas. EMY trabaja los lunes de 10:00 a 16:15; una reserva
+//          de Recepción a las 16:45 le daba el masaje a EMY, porque
+//          resolverStaffEnlazado elegía a la primera asignada SIN CITAS a
+//          esa hora, sin mirar su horario. Mover después el bloque a la
+//          columna de Angela no cambia el titular de la cita (sigue siendo
+//          EMY) y el cobro va por titular: se cobraría en la caja de
+//          externos.
+//          EL CAMBIO, solo en resolverStaffEnlazado (rama de Recepción con
+//          varias asignadas):
+//            1. la primera asignada que trabaja a esa hora y no tiene cita;
+//            2. si ninguna está libre, la primera que trabaja a esa hora;
+//            3. si no trabaja ninguna, la primera asignada (como antes:
+//               Recepción decide).
+//          «Trabaja a esa hora» = su horario de StaffConfig cubre desde la
+//          hora de inicio hasta el final del servicio enlazado, con el
+//          margen de cierre del salón (SalonConfig.closingGraceMin). Es la
+//          misma lectura y la misma condición que la reserva online
+//          (widgetPublicoLogic.resolverStaffLibre): parseHHMM y
+//          leerHorarioStaffEnDia son copia literal de widgetPublicoLogic
+//          v0.14.0, como ya hacen smartPricingLogic y staffConfigLogic.
+//          Los bloqueos ya contaban como ocupación (fase que ocupa con el
+//          staffId de la fila). Sin cambios: la rama de la reserva web
+//          (staffIdPedido), el caso de una sola asignada y el resto del
+//          archivo.
+//
+// v1.0.63: 🔀 SEGREGACIÓN FISCAL — LA PROFESIONAL ASIGNADA PUEDE HACER EL
+//          SERVICIO, Y LA CAJA LA DECIDE QUIEN HACE LA CITA.
+//          Caso Hair-Times: al masaje del Body Ritual (servicio enlazado)
+//          se asigna, además de EMY (externa), a Angela (interna). Con una
+//          interna asignada, esServicioDeExterna lo clasifica como servicio
+//          del salón (v1.0.51: «un solo asignado interno basta»), y
+//          validarSegregacionFiscal rechazaba toda cita del masaje con EMY:
+//          «… es un servicio del salón y no puede añadirse a una cita de la
+//          profesional externa». Fallaba en Recepción (el enlazado se da a
+//          la primera asignada libre, EMY) y al confirmar en la web.
+//          EL CAMBIO, solo en validarSegregacionFiscal: si quien hace la
+//          cita está entre las profesionales asignadas al servicio en el
+//          catálogo, se permite. La caja la sigue decidiendo el titular,
+//          como ya hacía marcarPagadoReserva (v1.0.37): la cita de EMY va a
+//          la caja de externos y la de Angela a la del salón.
+//          Sin cambios: la clasificación del servicio, la comprobación de
+//          complementos dentro de una misma cita (sigue comparando por
+//          servicio), el fail-open sin titular y el resto del archivo.
+//
+// v1.0.62: 🔗 SERVICIO ENLAZADO — DOS CITAS EN PARALELO, COBRO SEPARADO.
+//          Caso Hair-Times: el spa capilar (Raquel, Ricardo o Angela) se
+//          enlaza con el spa masaje de EMY. Empiezan a la vez, cada uno en
+//          su columna, y cada cita se cobra por su lado (la de EMY en la
+//          caja de externos, sin tocar el cobro).
+//          Campos nuevos (los crea el salón en el CMS):
+//            · ServiceCatalog.servicioEnlazado (Texto) → setupUid del
+//              servicio que va a la vez.
+//            · KamisuiteReservations.grupoEnlazado (Texto) → marca común
+//              de las dos citas. Se escribe en la MISMA inserción de cada
+//              una: no hay segunda escritura que pueda fallar.
+//
+//          (A) crearPackReserva. Si el principal tiene servicio enlazado:
+//              · El profesional del enlazado lo manda el llamante
+//                (`staffIdEnlazado`, la reserva web ya lo ha validado) o,
+//                desde Recepción, se resuelve entre los asignados al
+//                servicio enlazado (sin el del principal): el primero libre
+//                a esa hora y, si ninguno lo está, el primero. Recepción no
+//                valida disponibilidad, como siempre: el salón decide.
+//              · Se valida la segregación fiscal del enlazado contra SU
+//                profesional, antes de escribir nada.
+//              · Se inserta el principal y después el enlazado, con el
+//                mismo motor (misma cascada, sessions y oferta). Si el
+//                enlazado falla, se borra el principal (sessions incluidas)
+//                y se devuelve error: nunca queda media reserva.
+//              · Un solo aviso de confirmación con las dos: «servicios»
+//                lleva los dos nombres, «profesional» dice quién hace el
+//                enlazado, la hora final es la del que acaba más tarde y el
+//                importe es la suma. Mismo formato que el segundo
+//                profesional de la web: ninguna plantilla de Meta cambia.
+//              · Enlace mal configurado (servicio inactivo, fuera del
+//                catálogo de Recepción o sin profesional asignado) → la cita
+//                se crea sola y queda ⚠️ en el log.
+//              · Solo un nivel: el enlazado de un enlazado no se sigue.
+//              Para no depender de cómo trata Wix la llamada de un
+//              webMethod a sí mismo, el cuerpo pasa a la función interna
+//              _crearPackReservaImpl y el webMethod la envuelve. El cuerpo
+//              no cambia salvo lo marcado v1.0.62.
+//          (B) cancelarReserva cancela también la otra cita del grupo, salvo
+//              que esté cobrada o ya cancelada. Lo hereda el Área de
+//              Cliente, que delega aquí.
+//          (C) reprogramarReserva y moverFase: si cambia la hora de inicio
+//              de la cita, la otra se desplaza lo mismo (empiezan a la vez).
+//              Cambiar de columna una fase no toca la otra cita. Lo hereda
+//              el Área de Cliente (mover cita).
+//          (D) getReservasPorFecha devuelve `grupoEnlazado` para la marca
+//              de la agenda.
+//          Sin servicio enlazado, todo es idéntico a v1.0.61.
+//
+// v1.0.61: 🏷️ SMART PRICING — OFERTA GRABADA EN LA CITA (fase 1).
+//          Diseño aprobado por Jal el 21-oct-2026.
+//
+//          (A) crearPackReserva acepta un parámetro OPCIONAL `oferta`
+//              { pct, ahorro, versionId }. Si llega válido, se escribe en
+//              la MISMA inserción de la reserva (tres campos nuevos de
+//              KamisuiteReservations, ver F_RES_OFERTA). Así no puede
+//              existir una cita creada sin la oferta que se le prometió.
+//              Solo lo envía widgetPublicoLogic v0.13.0, después de
+//              revalidar la oferta en el servidor.
+//              QUÉ CAMBIA PARA QUIEN YA LLAMABA: nada. Recepción PRO V2,
+//              Recepción LITE MOBILE y el modo solo-cálculo no envían
+//              `oferta`: entra a null y el registro es idéntico byte a byte
+//              al de v1.0.60. El modo solo-cálculo sale antes de construir
+//              el registro, así que nunca lo toca.
+//          (B) getReservasPorFecha lee la oferta grabada y resuelve el
+//              DESCUENTO AUTOMÁTICO de cada cita: el MAYOR entre la oferta y
+//              la promo de catálogo, nunca la suma (decisión de Jal). Cuando
+//              gana la oferta, se rellenan los mismos campos que ya consume
+//              el widget (tienePromoServicio / descuentoServicioTotal) con el
+//              importe de la oferta, y `descuentoAutoTipo` dice cuál ganó
+//              ('oferta' | 'promo' | ''), para que el cobro anote el token
+//              correcto. Bloque síncrono sin consultas: no puede romper la
+//              agenda.
+//          Los IDs de campo están SOLO en F_RES_OFERTA. Se duplican aquí a
+//          propósito en vez de importar smartPricingLogic: este backend lo
+//          usan tres pantallas y no debe depender de que otro módulo cargue.
+//
+// v1.0.60: 🧮 MODO SOLO-CÁLCULO EN crearPackReserva.
+//          Nuevo parámetro OPCIONAL `soloCalcular` (Boolean, default false).
+//          Con `true`, la función recorre exactamente el mismo camino que al
+//          crear —catálogo, variante, normalización de complementos,
+//          construcción de la cascada y totales— y devuelve la duración y el
+//          precio reales SIN escribir absolutamente nada: ni contacto CRM, ni
+//          sessions, ni fila en KamisuiteReservations, ni notificación.
+//
+//          POR QUÉ. La única cifra fiable de cuánto ocupa una cita nace aquí
+//          dentro, y hasta ahora nacía cuando la cita YA estaba escrita. El
+//          motor de reservas online decide qué horas ofrecer y si una reserva
+//          cabe antes del cierre con un número calculado en el NAVEGADOR del
+//          cliente y enviado en el payload. Cuando esos dos números no
+//          coinciden, la cita nace más larga de lo validado y se pasa del
+//          horario de cierre sin que nada lo detecte, porque todas las
+//          comprobaciones se hicieron contra el número de fuera.
+//          Caso real Hair-Times 28-sep-2026: Mechas Completas Personalizadas
+//          + Corte Mujer + Matiz para Mechas, ofrecida a las 17:30 y creada
+//          17:30–20:20 con el salón cerrando a las 20:00. Las tres líneas
+//          suman 90 minutos en el front; la cascada real ocupa 170.
+//          Con este modo, widgetPublicoLogic v0.12.0 pregunta la duración
+//          real ANTES de ofrecer horas y ANTES de crear. La cifra la da el
+//          mismo código que construye las fases, así que no puede desviarse:
+//          no hay una segunda implementación que mantener sincronizada.
+//
+//          QUÉ CAMBIA PARA QUIEN YA LLAMABA A ESTA FUNCIÓN: nada. Recepción
+//          PRO V2 y Recepción LITE MOBILE no envían `soloCalcular`, así que
+//          entra a false y el recorrido es idéntico línea por línea al de
+//          v1.0.59. Los tres puntos tocados están guardados por ese flag:
+//            · Segregación fiscal → validación de alta, no se ejecuta.
+//            · Resolución del ancla → scheduleId, no hace falta para medir.
+//            · Contacto CRM → NO se crea (va antes de montar las fases, por
+//              eso no basta con salir al final).
+//          La salida ocurre justo después de calcular `duracionTotal`, antes
+//          de la primera escritura.
 //
 // v1.0.59: 🔓 REGLA INVERSA CON DESBLOQUEO PERMITIDO (`permiteQuitar`).
 //          Amplía la mitad inversa (1.0.58) con un flag `permiteQuitar`.
@@ -1377,7 +1537,7 @@ import wixData from 'wix-data';
 
 // v1.0.43 — la constante venía desfasada respecto a la cabecera (rezagada
 // en '1.0.41' mientras la cabecera ya documentaba v1.0.42). Se sincroniza.
-const VERSION = '1.0.59';
+const VERSION = '1.0.64';
 const TAG = `[RecepcionPRO][${VERSION}]`;
 const TIMEZONE = 'Europe/Madrid';
 
@@ -1385,6 +1545,19 @@ const CMS_CATALOGO = 'ServiceCatalog';
 const CMS_RESERVAS = 'KamisuiteReservations';
 const CMS_PAGOS = 'PaymentReservations';
 const CMS_STAFF = 'StaffConfig';
+
+// v1.0.61 — SMART PRICING: campos de la oferta en KamisuiteReservations.
+// Nombres PROPUESTOS: confirmar con cmsFieldReader tras crearlos. Mismos
+// valores que camposOfertaReserva() de smartPricingLogic.
+const F_RES_OFERTA = {
+  pct:       'ofertaPct',
+  ahorro:    'ofertaAhorro',
+  versionId: 'ofertaVersionId'
+};
+
+// v1.0.62 — SERVICIO ENLAZADO. IDs de campo confirmados por Jal.
+const F_CAT_ENLAZADO = 'servicioEnlazado';   // ServiceCatalog: setupUid del servicio que va a la vez
+const F_RES_GRUPO    = 'grupoEnlazado';      // KamisuiteReservations: marca común de las dos citas
 
 // v1.0.31 — F4/F5: colecciones de Productos Custom
 const CMS_VOUCHERS              = 'KamisuiteVouchers';
@@ -1706,6 +1879,18 @@ async function validarSegregacionFiscal(svc, staffId, contexto) {
     return { ok: true };
   }
 
+  // v1.0.63 — Si quien hace la cita está asignada al servicio en el
+  // catálogo, se permite: la caja la decide el titular, como en el cobro
+  // (marcarPagadoReserva v1.0.37). Ej.: masaje con EMY (externa) y Angela
+  // (interna) asignadas.
+  const asignadas = parseIdStaffCatalogo(svc?.idStaff).map(String);
+  if (staffId && asignadas.includes(String(staffId))) {
+    if (svcExterno !== titularExterno) {
+      console.log(`${TAG} 🔀 [${contexto}] "${svc?.label}" con profesional asignada ${titularExterno ? 'externa' : 'interna'} (staffId=${staffId}) → permitido; caja del titular.`);
+    }
+    return { ok: true };
+  }
+
   if (svcExterno && !titularExterno) {
     return {
       ok: false,
@@ -1721,6 +1906,243 @@ async function validarSegregacionFiscal(svc, staffId, contexto) {
   }
 
   return { ok: true };
+}
+
+// =====================================================
+// v1.0.62 — SERVICIO ENLAZADO: helpers
+// =====================================================
+
+// Marca común de las dos citas. Basta con que sea única: no codifica nada.
+function generarGrupoEnlazado() {
+  return 'enl_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8);
+}
+
+// Las otras citas del mismo grupo (normalmente una).
+async function leerHermanasEnlazadas(grupo, excluirId) {
+  if (!grupo) return [];
+  const r = await wixData.query(CMS_RESERVAS)
+    .eq(F_RES_GRUPO, grupo)
+    .limit(10)
+    .find({ suppressAuth: true });
+  return (r.items || []).filter(it => it && it._id !== excluirId);
+}
+
+// Desplaza una cita entera `deltaMs` (fecha y todas sus fases). Mismo
+// cálculo que reprogramarReserva. READ-MERGE-UPDATE: `reg` es el documento
+// completo recién leído.
+async function desplazarRegistro(reg, deltaMs) {
+  const old = new Date(reg.fechaReserva);
+  reg.fechaReserva = new Date(old.getTime() + deltaMs);
+  const fasesArr = jsonIn(reg.fases, 'items');
+  reg.fases = {
+    items: fasesArr.map(f => {
+      const nf = { ...f };
+      if (f.start) nf.start = new Date(new Date(f.start).getTime() + deltaMs).toISOString();
+      if (f.end) nf.end = new Date(new Date(f.end).getTime() + deltaMs).toISOString();
+      return nf;
+    })
+  };
+  await wixData.update(CMS_RESERVAS, reg, { suppressAuth: true });
+}
+
+// Desplaza `deltaMs` las otras citas del grupo de `registro`. Cobradas o
+// canceladas no se tocan. Devuelve cuántas se movieron. Nunca lanza: la
+// cita principal ya está movida; si la otra falla queda ❌ en el log.
+async function moverHermanasEnlazadas(registro, reservaId, deltaMs) {
+  const grupo = String(registro?.[F_RES_GRUPO] || '').trim();
+  if (!grupo || !deltaMs) return 0;
+  let n = 0;
+  try {
+    const hermanas = await leerHermanasEnlazadas(grupo, reservaId);
+    for (const h of hermanas) {
+      if (h.status === 'CANCELADA' || h.status === 'PAGADO') {
+        console.log(`${TAG} 🔗 Enlazada ${h._id} en estado ${h.status} → no se mueve`);
+        continue;
+      }
+      await desplazarRegistro(h, deltaMs);
+      n++;
+      console.log(`${TAG} 🔗 Enlazada ${h._id} desplazada ${Math.round(deltaMs / 60000)} min con ${reservaId}`);
+    }
+  } catch (e) {
+    console.error(`${TAG} ❌ La cita enlazada del grupo ${grupo} no se pudo mover con ${reservaId}: ${e.message}`);
+  }
+  return n;
+}
+
+// Borra sessions recién creadas (marcha atrás de la cita enlazada).
+async function borrarSessionsCreadas(sessionIds) {
+  for (const sid of (Array.isArray(sessionIds) ? sessionIds : [])) {
+    if (!sid) continue;
+    try {
+      await sessions.deleteSession(sid, { suppressAuth: true });
+    } catch (sErr) {
+      console.warn(`${TAG} ⚠️ Marcha atrás: no se pudo borrar la session ${sid}: ${sErr.message}`);
+    }
+  }
+}
+
+// Borra una cita recién creada (sessions + fila). Solo lo usa la marcha
+// atrás de crearPackReserva cuando la cita enlazada no se ha podido crear.
+async function deshacerReservaCreada(reservaId, sessionIds) {
+  await borrarSessionsCreadas(sessionIds);
+  try {
+    await wixData.remove(CMS_RESERVAS, reservaId, { suppressAuth: true });
+    console.log(`${TAG} ↩️ Marcha atrás: cita ${reservaId} borrada`);
+  } catch (rErr) {
+    console.error(`${TAG} ❌ Marcha atrás: NO se pudo borrar la cita ${reservaId}: ${rErr.message}`);
+  }
+}
+
+// v1.0.64 — HORARIO DEL PERSONAL. Copia literal de widgetPublicoLogic
+// v0.14.0 (parseHHMM + leerHorarioStaffEnDia), igual que hacen
+// smartPricingLogic y staffConfigLogic, para elegir la profesional de la
+// cita enlazada con la misma lectura de horario que la reserva online.
+function parseHHMM(s) {
+  const m = String(s || '').match(/^(\d{1,2}):(\d{2})$/);
+  if (!m) return null;
+  const h = +m[1], mi = +m[2];
+  if (h < 0 || h > 23 || mi < 0 || mi > 59) return null;
+  return h * 60 + mi;
+}
+
+// Lee horario {from,to} del staff para un dow concreto.
+// Devuelve null si está cerrado, no tiene horario configurado, o no parsea.
+function leerHorarioStaffEnDia(staffRow, dow) {
+  const raw = staffRow?.workingHoursSessionIds;
+  if (!raw) return null;
+  let items = [];
+  try {
+    if (typeof raw === 'string') {
+      const obj = JSON.parse(raw);
+      items = Array.isArray(obj?.items) ? obj.items : (Array.isArray(obj) ? obj : []);
+    } else if (raw && typeof raw === 'object') {
+      items = Array.isArray(raw.items) ? raw.items : (Array.isArray(raw) ? raw : []);
+    }
+  } catch (e) {
+    console.warn(`${TAG} ⚠️ workingHours JSON inválido (${staffRow?.canonicalName || staffRow?._id}):`, e.message);
+    return null;
+  }
+  const day = items.find(it => Number(it?.dow) === dow);
+  if (!day || !day.open) return null;
+  const from = parseHHMM(day.from);
+  const to = parseHHMM(day.to);
+  if (from == null || to == null || from >= to) return null;
+  return { from, to };
+}
+
+// v1.0.64 — Margen de cierre del salón (SalonConfig.closingGraceMin).
+// Misma lectura y mismo fallback que widgetPublicoLogic.leerConfigMotor:
+// vacío, null o error → 0 (corte estricto en el `to` del horario).
+const CMS_CONFIG = 'SalonConfig';
+async function leerMargenCierreSalon() {
+  try {
+    const rCfg = await wixData.query(CMS_CONFIG)
+      .limit(1)
+      .find({ suppressAuth: true });
+    const cfg = rCfg.items?.[0];
+    if (!cfg) return 0;
+    const rawGrace = Number(cfg.closingGraceMin);
+    return (Number.isFinite(rawGrace) && rawGrace >= 0) ? rawGrace : 0;
+  } catch (e) {
+    console.warn(`${TAG} ⚠️ leerMargenCierreSalon falló (${e.message}) → margen 0`);
+    return 0;
+  }
+}
+
+// Profesional de la cita enlazada.
+//   · `staffIdPedido` (reserva web): se acepta si está activo y no es un
+//     recurso interno. Si no, error: la web ya prometió esa pareja.
+//   · Sin él (Recepción): entre los asignados al servicio enlazado, sin el
+//     profesional del principal, el primero que trabaja a esa hora y está
+//     libre; si ninguno lo está, el primero que trabaja a esa hora; si no
+//     trabaja ninguno, el primero (Recepción decide). v1.0.64: horario.
+// Devuelve { staffId, staffName }, { error } o null (sin nadie asignado).
+async function resolverStaffEnlazado({ svcEnl, fecha, horaHHmm, staffIdPrincipal, staffIdPedido }) {
+  const rStaff = await wixData.query(CMS_STAFF)
+    .eq('active', true)
+    .limit(100)
+    .find({ suppressAuth: true });
+  const activos = (rStaff.items || []).filter(s => {
+    if (String(s.notes || '').includes(NOTA_RECURSO_INTERNO)) return false;
+    const canon = String(s.canonicalName || '').toUpperCase();
+    return canon !== 'CUALQUIERA' && canon !== 'PROCESO';
+  });
+  const idDe = s => String(s.wixResourceId || s._id || '');
+  const nombreDe = s => String(s.displayName || s.canonicalName || '').replace(/^[A-Z]_/, '');
+
+  const pedido = String(staffIdPedido || '').trim();
+  if (pedido) {
+    const row = activos.find(s => idDe(s) === pedido);
+    if (!row) return { error: 'El profesional del servicio enlazado no está disponible.' };
+    return { staffId: idDe(row), staffName: nombreDe(row) };
+  }
+
+  const ids = parseIdStaffCatalogo(svcEnl.idStaff)
+    .map(String)
+    .filter(id => id && id !== String(staffIdPrincipal || ''));
+  const candidatos = ids
+    .map(id => activos.find(s => idDe(s) === id))
+    .filter(Boolean);
+  if (!candidatos.length) return null;
+  if (candidatos.length === 1) {
+    return { staffId: idDe(candidatos[0]), staffName: nombreDe(candidatos[0]) };
+  }
+
+  // Varios asignados: el primero que trabaja a esa hora y no tiene cita
+  // (v1.0.64: horario). Ocupación con el mismo criterio que el motor de
+  // huecos: fases que ocupan, con el profesional de la fase si lo tiene;
+  // las citas sin fases bloquean su duración total.
+  try {
+    const inicioMs = new Date(madridToUTC(fecha, horaHHmm)).getTime();
+    const finMs = inicioMs + Math.max(1, toNum(svcEnl.duration)) * 60000;
+    const startUTC = new Date(new Date(`${fecha}T00:00:00`).getTime() - 3 * 3600000);
+    const endUTC = new Date(new Date(`${fecha}T23:59:59`).getTime() + 3 * 3600000);
+    const rRes = await wixData.query(CMS_RESERVAS)
+      .ge('fechaReserva', startUTC)
+      .le('fechaReserva', endUTC)
+      .ne('status', 'CANCELADA')
+      .limit(500)
+      .find({ suppressAuth: true });
+    const ocupado = (sid) => (rRes.items || []).some(r => {
+      const fasesArr = jsonIn(r.fases, 'items');
+      if (!fasesArr.length) {
+        if (r.staffId !== sid || !r.fechaReserva) return false;
+        const s0 = new Date(r.fechaReserva).getTime();
+        const e0 = s0 + (toNum(r.duracionTotal) || 0) * 60000;
+        return inicioMs < e0 && finMs > s0;
+      }
+      return fasesArr.some(f => {
+        if (!f || f.ocupa === false || !f.start || !f.end) return false;
+        if ((f.staffId || r.staffId) !== sid) return false;
+        return inicioMs < new Date(f.end).getTime() && finMs > new Date(f.start).getTime();
+      });
+    });
+    // v1.0.64 — ¿Trabaja a esa hora? Misma condición que la reserva online
+    // (resolverStaffLibre): su horario de ese día cubre desde el inicio
+    // hasta el final del enlazado, con el margen de cierre del salón.
+    const [yH, moH, dH] = String(fecha).split('-').map(Number);
+    const dow = new Date(yH, moH - 1, dH).getDay(); // 0..6
+    const iniMin = parseHHMM(horaHHmm);
+    const finMin = iniMin == null ? null : iniMin + Math.max(1, toNum(svcEnl.duration));
+    const graceMin = await leerMargenCierreSalon();
+    const trabaja = (s) => {
+      if (iniMin == null) return true;   // hora ilegible: no se descarta a nadie
+      const h = leerHorarioStaffEnDia(s, dow);
+      return !!h && iniMin >= h.from && finMin <= h.to + graceMin;
+    };
+
+    const libre = candidatos.find(s => trabaja(s) && !ocupado(idDe(s)));
+    if (libre) return { staffId: idDe(libre), staffName: nombreDe(libre) };
+    const deTurno = candidatos.find(s => trabaja(s));
+    if (deTurno) {
+      console.warn(`${TAG} ⚠️ Enlazado "${svcEnl.label}": ninguna asignada libre a ${fecha} ${horaHHmm} → se asigna a ${nombreDe(deTurno)}, que trabaja a esa hora (Recepción decide).`);
+      return { staffId: idDe(deTurno), staffName: nombreDe(deTurno) };
+    }
+    console.warn(`${TAG} ⚠️ Enlazado "${svcEnl.label}": ninguna asignada trabaja a ${fecha} ${horaHHmm} → se asigna a ${nombreDe(candidatos[0])} (Recepción decide).`);
+  } catch (eOc) {
+    console.warn(`${TAG} ⚠️ Enlazado "${svcEnl.label}": no se pudo mirar la ocupación (${eOc.message}) → primer asignado.`);
+  }
+  return { staffId: idDe(candidatos[0]), staffName: nombreDe(candidatos[0]) };
 }
 
 async function cargarCatalogoCompleto() {
@@ -2484,7 +2906,13 @@ function normalizarComplementosElegidos(complementosSetupUid, porSetupUid) {
 
 export const crearPackReserva = webMethod(
   Permissions.SiteMember,
-  async (payload) => {
+  async (payload) => _crearPackReservaImpl(payload)
+);
+
+// v1.0.62 — Cuerpo de crearPackReserva. Función interna para que la cita
+// enlazada se cree con el MISMO motor sin que el webMethod se llame a sí
+// mismo. Solo cambia lo marcado v1.0.62.
+async function _crearPackReservaImpl(payload) {
     const t0 = Date.now();
     try {
       const {
@@ -2509,8 +2937,27 @@ export const crearPackReserva = webMethod(
         // retrocompatibilidad: todas las llamadas existentes (Recepción Pro)
         // siguen creando con origenRecepcion=true sin cambios. El widget
         // público llama con origenRecepcion=false vía crearReservaPublica.
-        origenRecepcion = true
+        origenRecepcion = true,
+        // v1.0.60 — MODO SOLO-CÁLCULO. Con true no se escribe nada: se
+        // devuelve { ok, soloCalculo:true, duracionTotal, precioTotal, fases }
+        // justo después de construir la cascada. Lo usa widgetPublicoLogic
+        // para medir la cita con el MISMO código que la construye, en vez de
+        // fiarse de la duración que llega del navegador.
+        soloCalcular = false,
+        // v1.0.61 — SMART PRICING. Oferta ya confirmada por el servidor
+        // { pct, ahorro, versionId }. Solo la envía widgetPublicoLogic
+        // v0.13.0. Ausente → null → registro idéntico a v1.0.60.
+        oferta = null,
+        // v1.0.62 — SERVICIO ENLAZADO. Solo la reserva web los envía: el
+        // profesional del enlazado ya validado y su oferta (o null).
+        staffIdEnlazado = '',
+        ofertaEnlazada = null,
+        // v1.0.62 — Uso interno: segunda llamada que crea la cita enlazada.
+        // Lleva la marca de grupo, no notifica y no sigue más enlaces.
+        grupoEnlazado = '',
+        _comoEnlazada = false
       } = payload || {};
+      const esEnlazadaInterna = _comoEnlazada === true;
 
       if (!fecha || !horaHHmm || !principalSetupUid) {
         return { ok: false, version: VERSION, error: { message: 'Faltan fecha, horaHHmm o principalSetupUid' } };
@@ -2527,7 +2974,9 @@ export const crearPackReserva = webMethod(
       // los complementos elegidos: basta UNA línea de la otra naturaleza para
       // que el pack acabe cobrándose en el ledger equivocado, porque
       // marcarPagadoReserva enruta por el TITULAR, no por línea.
-      {
+      // v1.0.60 — Solo al crear. En modo solo-cálculo no se valida el alta:
+      // aquí únicamente se miden minutos.
+      if (!soloCalcular) {
         const seg = await validarSegregacionFiscal(principalBase, staffId, 'crearPackReserva');
         if (!seg.ok) {
           console.warn(`${TAG} ⛔ Segregación fiscal (principal): ${seg.error}`);
@@ -2545,6 +2994,42 @@ export const crearPackReserva = webMethod(
             const msg = `"${svcComp.label || 'Un servicio elegido'}" no puede ir en la misma cita que "${principalBase.label || 'el servicio principal'}": uno lo presta el salón y el otro personal externo, y su facturación es independiente.`;
             console.warn(`${TAG} ⛔ Segregación fiscal (complemento): ${msg}`);
             return { ok: false, version: VERSION, error: { message: msg } };
+          }
+        }
+      }
+
+      // ─── v1.0.62 — SERVICIO ENLAZADO: resolver ANTES de escribir nada ───
+      // Profesional y segregación fiscal del enlazado se comprueban aquí, de
+      // modo que un error no deja ninguna cita a medias. En modo solo-cálculo
+      // y en la propia cita enlazada no se sigue ningún enlace.
+      let enlace = null;
+      if (!soloCalcular && !esEnlazadaInterna) {
+        const uidEnl = String(principalBase[F_CAT_ENLAZADO] || '').trim();
+        if (uidEnl && uidEnl !== principalSetupUid) {
+          const svcEnl = porSetupUid[uidEnl];
+          if (!svcEnl) {
+            console.warn(`${TAG} ⚠️ "${principalBase.label}" tiene servicio enlazado ${uidEnl}, que no está activo en el catálogo de Recepción → la cita se crea sola.`);
+          } else {
+            const st = await resolverStaffEnlazado({
+              svcEnl, fecha, horaHHmm,
+              staffIdPrincipal: staffId,
+              staffIdPedido: staffIdEnlazado
+            });
+            if (st && st.error) {
+              console.warn(`${TAG} ⛔ Enlazado "${svcEnl.label}": ${st.error} (staffIdEnlazado=${staffIdEnlazado})`);
+              return { ok: false, version: VERSION, error: { message: st.error } };
+            }
+            if (!st) {
+              console.warn(`${TAG} ⚠️ Enlazado "${svcEnl.label}" sin profesional asignado (o solo el del principal) → la cita se crea sola.`);
+            } else {
+              const segEnl = await validarSegregacionFiscal(svcEnl, st.staffId, 'crearPackReserva·enlazado');
+              if (!segEnl.ok) {
+                console.warn(`${TAG} ⛔ Segregación fiscal (enlazado): ${segEnl.error}`);
+                return { ok: false, version: VERSION, error: { message: segEnl.error } };
+              }
+              enlace = { svc: svcEnl, staffId: st.staffId, staffName: st.staffName, grupo: generarGrupoEnlazado() };
+              console.log(`${TAG} 🔗 Enlazado: "${svcEnl.label}" con ${st.staffName || st.staffId} a las ${horaHHmm} (grupo ${enlace.grupo})`);
+            }
           }
         }
       }
@@ -2569,16 +3054,24 @@ export const crearPackReserva = webMethod(
       }
 
       // ─── 2. Resolver ancla → scheduleId (por familia, desde la fila) ───
+      // v1.0.60 — El ancla solo hace falta para crear sessions. En modo
+      // solo-cálculo se omite (una query menos y ningún fallo por ancla mal
+      // resuelta puede impedir medir la duración).
       const wixAnclaId = principal.wixAnclaId || '';
-      const scheduleId = await resolverScheduleIdAncla(wixAnclaId);
-      if (!scheduleId) {
-        return { ok: false, version: VERSION, error: { message: `No se pudo resolver scheduleId del ancla ${wixAnclaId}` } };
+      let scheduleId = '';
+      if (!soloCalcular) {
+        scheduleId = await resolverScheduleIdAncla(wixAnclaId);
+        if (!scheduleId) {
+          return { ok: false, version: VERSION, error: { message: `No se pudo resolver scheduleId del ancla ${wixAnclaId}` } };
+        }
       }
 
       // ─── 3. Garantizar contacto CRM (excepto si cliente provisional) ───
       // v1.0.6 — esProvisional: cliente eventual de paso, no se persiste en CRM.
       // contactId queda vacío → no recibe comunicaciones, no ensucia CRM.
-      const finalContactId = esProvisional
+      // v1.0.60 — En modo solo-cálculo NUNCA se toca el CRM. Este paso va
+      // antes de montar las fases, así que no bastaría con salir al final.
+      const finalContactId = (soloCalcular || esProvisional)
         ? null
         : await ensureContactInCRM(contactDetails, memberContactId);
 
@@ -2736,6 +3229,22 @@ export const crearPackReserva = webMethod(
         (new Date(cursorISO).getTime() - new Date(startISO).getTime()) / 60000
       );
 
+      // ─── 7-bis. v1.0.60 — SALIDA EN MODO SOLO-CÁLCULO ───
+      // Última línea antes de la primera escritura. A partir de aquí se
+      // crean sessions, se inserta la reserva y se notifica.
+      if (soloCalcular) {
+        const elapsedCalc = ((Date.now() - t0) / 1000).toFixed(2);
+        console.log(`${TAG} 🧮 crearPackReserva SOLO-CÁLCULO: ${principal.label || principalSetupUid} | ${duracionTotal}min | ${precioTotal}€ | ${fasesPack.length} fases | ${elapsedCalc}s`);
+        return {
+          ok: true,
+          version: VERSION,
+          soloCalculo: true,
+          duracionTotal,
+          precioTotal,
+          fases: fasesPack
+        };
+      }
+
       // ─── 7. Crear sessions SOLO de las fases que ocupan ───
       // PROCESO no genera session (libera al stylist — concepto fundacional).
       const clientName = `${contactDetails?.firstName || ''} ${contactDetails?.lastName || ''}`.trim();
@@ -2807,11 +3316,94 @@ export const crearPackReserva = webMethod(
         origenRecepcion: !!origenRecepcion   // v1.0.17 — bool del payload (default true)
       };
 
-      const inserted = await wixData.insert(CMS_RESERVAS, registro, { suppressAuth: true });
+      // v1.0.61 — SMART PRICING. La oferta va en la MISMA inserción. Se
+      // valida aquí también: porcentaje entero 1–100 y ahorro > 0, nunca
+      // mayor que el precio de la cita. Sin oferta válida, el registro no
+      // cambia en nada.
+      if (oferta && typeof oferta === 'object') {
+        const oPct = Math.round(Number(oferta.pct));
+        const oAhorro = Math.round(toNum(oferta.ahorro) * 100) / 100;
+        if (Number.isFinite(oPct) && oPct >= 1 && oPct <= 100 && oAhorro > 0) {
+          registro[F_RES_OFERTA.pct] = oPct;
+          registro[F_RES_OFERTA.ahorro] = Math.min(oAhorro, toNum(precioTotal));
+          registro[F_RES_OFERTA.versionId] = String(oferta.versionId || '');
+          console.log(`${TAG} 🏷️ Oferta grabada en la cita: −${oPct}% (−${registro[F_RES_OFERTA.ahorro]}€)`);
+        } else {
+          console.warn(`${TAG} ⚠️ Oferta recibida no válida, se ignora: ${JSON.stringify(oferta)}`);
+        }
+      }
+
+      // v1.0.62 — SERVICIO ENLAZADO: la marca de grupo va en la MISMA
+      // inserción. Sin enlace, el registro no cambia en nada.
+      const grupoFinal = enlace
+        ? enlace.grupo
+        : (esEnlazadaInterna ? String(grupoEnlazado || '').trim() : '');
+      if (grupoFinal) registro[F_RES_GRUPO] = grupoFinal;
+
+      // v1.0.62 — Si la cita ENLAZADA no se puede insertar, sus sessions se
+      // borran aquí: la marcha atrás del principal no las conoce.
+      let inserted;
+      try {
+        inserted = await wixData.insert(CMS_RESERVAS, registro, { suppressAuth: true });
+      } catch (eIns) {
+        if (esEnlazadaInterna) await borrarSessionsCreadas(sessionIds);
+        throw eIns;
+      }
       const reservaId = inserted?._id || '';
 
       const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
       console.log(`${TAG} ✅ Pack creado: ${reservaId} | ${fasesPack.length} fases | ${sessionIds.length} sessions | ${precioTotal}€ | ${elapsed}s`);
+
+      // ─── v1.0.62 — SERVICIO ENLAZADO: crear la otra cita ───
+      // Mismo motor, misma hora, columna de su profesional. Si falla, marcha
+      // atrás del principal: nunca queda media reserva.
+      let enlazadaRes = null;
+      if (enlace) {
+        let r2 = null;
+        try {
+          r2 = await _crearPackReservaImpl({
+            fecha,
+            horaHHmm,
+            principalSetupUid: enlace.svc.setupUid,
+            complementosSetupUid: [],
+            staffId: enlace.staffId,
+            staffName: enlace.staffName,
+            contactDetails,
+            // El contacto ya está resuelto: no se vuelve a buscar ni crear.
+            memberContactId: finalContactId || memberContactId || '',
+            notas,
+            esProvisional,
+            varianteSel: null,
+            origenRecepcion,
+            oferta: ofertaEnlazada,
+            grupoEnlazado: enlace.grupo,
+            _comoEnlazada: true
+          });
+        } catch (eEnl) {
+          r2 = { ok: false, error: safeErr(eEnl) };
+        }
+        if (!r2 || !r2.ok) {
+          const motivo = r2?.error?.message || 'error desconocido';
+          console.error(`${TAG} ❌ Cita enlazada "${enlace.svc.label}" NO creada (${motivo}) → marcha atrás de ${reservaId}`);
+          await deshacerReservaCreada(reservaId, sessionIds);
+          return {
+            ok: false,
+            version: VERSION,
+            // Mensaje de KAMISUITE, sin el texto técnico (queda en el log).
+            error: { message: `No se ha podido crear la cita de ${enlace.svc.label || 'el servicio enlazado'} que va a la vez, así que no se ha guardado ninguna de las dos. Vuelve a intentarlo y, si se repite, revisa ese servicio en el Editor de Servicios.` }
+          };
+        }
+        enlazadaRes = {
+          reservaId: r2.reservaId,
+          staffId: enlace.staffId,
+          staffName: enlace.staffName,
+          label: enlace.svc.label || '',
+          precioTotal: r2.precioTotal,
+          duracionTotal: r2.duracionTotal,
+          fases: r2.fases
+        };
+        console.log(`${TAG} 🔗 Pareja creada: ${reservaId} + ${r2.reservaId} (grupo ${enlace.grupo})`);
+      }
 
       // ─── 11. NOTIFICACIÓN VÍA CENTRALITA DE COMUNICACIONES (v1.0.18) ──
       // Solo si origenRecepcion=true (Recepción Pro). El widget público
@@ -2823,11 +3415,13 @@ export const crearPackReserva = webMethod(
       // la centralita falla por cualquier motivo (token caducado, plantilla
       // rechazada, fallo de red, etc.) el cliente simplemente no recibe la
       // notificación. Recepción Pro sigue su flujo normal.
-      if (origenRecepcion) {
+      // v1.0.62 — La cita enlazada no avisa: el aviso es uno solo, el del
+      // principal, y ya incluye las dos.
+      if (origenRecepcion && !esEnlazadaInterna) {
         try {
           // 1) Nombre del servicio en lenguaje cliente. Usamos labelsPrincipales
           //    que ya construimos para el title (principal + complementos).
-          const serviciosStr = labelsPrincipales.join(' + ') || principal.label || 'Tu cita';
+          let serviciosStr = labelsPrincipales.join(' + ') || principal.label || 'Tu cita';
 
           // 2) Nombre del estilista. Si staffName vino en el payload, lo usamos.
           //    Si no (por ejemplo cuando el operador deja staffName='' aunque
@@ -2846,19 +3440,30 @@ export const crearPackReserva = webMethod(
             } catch (_) { /* sin nombre, va sin */ }
           }
 
+          // v1.0.62 — Cita enlazada: mismo formato que el segundo profesional
+          // de la web («Raquel · Spa masaje con EMY»), en una sola línea.
+          if (enlazadaRes) {
+            serviciosStr = `${serviciosStr} + ${enlazadaRes.label}`;
+            estilistaStr = `${estilistaStr} · ${enlazadaRes.label} con ${enlazadaRes.staffName}`;
+          }
+
           // 3) Fecha bonita DD/MM/YYYY (formato V1 esperado por el driver
           //    WhatsApp y por las plantillas de email Wix).
           const [yy, mm2, dd] = String(fecha).split('-');
           const fechaBonita = `${dd}/${mm2}/${yy}`;
 
           // 4) Hora final = horaInicio + duracionTotal en minutos.
+          // v1.0.62 — Con cita enlazada, la del que acaba más tarde.
           const [hh, mi] = String(horaHHmm).split(':').map(Number);
-          const endMin = hh * 60 + mi + duracionTotal;
+          const durAviso = Math.max(duracionTotal, enlazadaRes ? toNum(enlazadaRes.duracionTotal) : 0);
+          const endMin = hh * 60 + mi + durAviso;
           const eh = Math.floor(endMin / 60);
           const em = endMin % 60;
           const horaFinal = String(eh).padStart(2, '0') + ':' + String(em).padStart(2, '0');
 
-          const importeStr = `${precioTotal}€`;
+          // v1.0.62 — Con cita enlazada, la suma de las dos.
+          const importeAviso = Math.round((precioTotal + (enlazadaRes ? toNum(enlazadaRes.precioTotal) : 0)) * 100) / 100;
+          const importeStr = `${importeAviso}€`;
           // Origen 'Reserva' (V1) — distingue del 'Reserva Online' del widget.
           const origenStr = 'Reserva';
           // En Recepción Pro las citas no pagan online: el cobro se hace
@@ -2911,15 +3516,17 @@ export const crearPackReserva = webMethod(
         precioTotal,
         duracionTotal,
         contactId: finalContactId,
-        tiempo: elapsed
+        tiempo: elapsed,
+        // v1.0.62 — SERVICIO ENLAZADO ('' / null si no hay)
+        grupoEnlazado: grupoFinal,
+        enlazada: enlazadaRes
       };
 
     } catch (e) {
       console.error(`${TAG} ❌ crearPackReserva:`, e.message);
       return { ok: false, version: VERSION, error: safeErr(e) };
     }
-  }
-);
+}
 
 // =====================================================
 // 3. GET RESERVAS POR FECHA
@@ -2987,7 +3594,11 @@ export const getReservasPorFecha = webMethod(
         tienePromoServicio: false,               // v1.0.19 — se rellena abajo si aplica
         descuentoServicioTotal: 0,               // v1.0.19 — suma del ahorro
         serviciosPromo: [],                      // v1.0.19 — detalle de servicios con promo
-        productosVendidos: []                    // v1.0.55 — se rellena abajo si aplica
+        productosVendidos: [],                   // v1.0.55 — se rellena abajo si aplica
+        ofertaPct: toNum(item[F_RES_OFERTA.pct]),       // v1.0.61 — oferta grabada al reservar
+        ofertaAhorro: toNum(item[F_RES_OFERTA.ahorro]), // v1.0.61
+        descuentoAutoTipo: '',                   // v1.0.61 — 'oferta' | 'promo' | '' (se resuelve abajo)
+        grupoEnlazado: String(item[F_RES_GRUPO] || '')  // v1.0.62 — cita enlazada ('' si no)
       }));
 
 
@@ -3076,6 +3687,22 @@ export const getReservasPorFecha = webMethod(
       } catch (ePromo) {
         // No-blocking: cada reserva conserva sus defaults (false/0/[])
         console.warn(`${TAG} ⚠ cruce promo (no-blocking):`, ePromo.message);
+      }
+
+      // v1.0.61 — SMART PRICING. Descuento automático = el MAYOR entre la
+      // oferta grabada y la promo de catálogo; nunca la suma. Si gana la
+      // oferta, viaja en los mismos campos que ya pinta y cobra el widget.
+      // Síncrono y sin consultas: no puede romper la agenda.
+      for (const r of reservas) {
+        const ofA = Math.round((Number(r.ofertaAhorro) || 0) * 100) / 100;
+        const prA = Number(r.descuentoServicioTotal) || 0;
+        if (ofA > 0 && ofA > prA) {
+          r.descuentoAutoTipo = 'oferta';
+          r.tienePromoServicio = true;
+          r.descuentoServicioTotal = ofA;
+        } else if (r.tienePromoServicio === true && prA > 0) {
+          r.descuentoAutoTipo = 'promo';
+        }
       }
 
       // v1.0.55 — Cruce con las ventas de producto hechas DESDE estas citas.
@@ -3349,7 +3976,39 @@ export const cancelarReserva = webMethod(
       await wixData.update(CMS_RESERVAS, registro, { suppressAuth: true });
 
       console.log(`${TAG} ✅ Reserva ${reservaId} CANCELADA | ${borradas} sessions borradas`);
-      return { ok: true, version: VERSION, reservaId, sessionesBorradas: borradas };
+
+      // v1.0.62 — SERVICIO ENLAZADO: se cancela también la otra cita, con
+      // los mismos dos pasos. Una cita ya cobrada o ya cancelada no se toca.
+      // Si falla, la principal ya está cancelada: queda ❌ en el log.
+      let enlazadasCanceladas = 0;
+      const grupoC = String(registro[F_RES_GRUPO] || '').trim();
+      if (grupoC) {
+        try {
+          const hermanas = await leerHermanasEnlazadas(grupoC, reservaId);
+          for (const h of hermanas) {
+            if (h.status === 'CANCELADA' || h.status === 'PAGADO') {
+              console.log(`${TAG} 🔗 Enlazada ${h._id} en estado ${h.status} → no se cancela`);
+              continue;
+            }
+            for (const sid of jsonIn(h.sessionIds, 'ids')) {
+              if (!sid) continue;
+              try {
+                await sessions.deleteSession(sid, { suppressAuth: true });
+              } catch (sErr) {
+                console.warn(`${TAG} ⚠️ No se pudo borrar session ${sid} (enlazada): ${sErr.message}`);
+              }
+            }
+            h.status = 'CANCELADA';
+            await wixData.update(CMS_RESERVAS, h, { suppressAuth: true });
+            enlazadasCanceladas++;
+            console.log(`${TAG} 🔗 Enlazada ${h._id} CANCELADA con ${reservaId}`);
+          }
+        } catch (eEnl) {
+          console.error(`${TAG} ❌ cancelarReserva: la cita enlazada del grupo ${grupoC} no se pudo cancelar: ${eEnl.message}`);
+        }
+      }
+
+      return { ok: true, version: VERSION, reservaId, sessionesBorradas: borradas, enlazadasCanceladas };
 
     } catch (e) {
       console.error(`${TAG} ❌ cancelarReserva:`, e.message);
@@ -3761,7 +4420,12 @@ export const reprogramarReserva = webMethod(
 
       await wixData.update(CMS_RESERVAS, registro, { suppressAuth: true });
       console.log(`${TAG} ✅ Reprogramada ${reservaId}: ${oldDate.toISOString()} → ${newDate.toISOString()}`);
-      return { ok: true, reservaId, fechaReserva: newDate.toISOString() };
+
+      // v1.0.62 — SERVICIO ENLAZADO: empiezan a la vez, así que la otra
+      // cita se desplaza lo mismo. Cobrada o cancelada no se toca.
+      const enlazadasMovidas = await moverHermanasEnlazadas(registro, reservaId, deltaMs);
+
+      return { ok: true, reservaId, fechaReserva: newDate.toISOString(), enlazadasMovidas };
     } catch (e) {
       console.error(`${TAG} ❌ reprogramarReserva:`, e.message);
       return { ok: false, error: e.message };
@@ -4442,18 +5106,29 @@ export const moverFase = webMethod(
         maxEnd = newEndDate.getTime();
       }
 
+      // v1.0.62 — inicio de la cita ANTES del movimiento (para la enlazada)
+      const inicioAntesMs = registro.fechaReserva ? new Date(registro.fechaReserva).getTime() : NaN;
+
       registro.fases = { items: fasesNew };
       registro.fechaReserva = new Date(minStart);
       registro.duracionTotal = Math.max(1, Math.round((maxEnd - minStart) / 60000));
 
       await wixData.update(CMS_RESERVAS, registro, { suppressAuth: true });
       console.log(`${TAG} ✅ Fase movida: idx=${idx} start=${newStartDate.toISOString()} staff=${nuevoStaffId || '(raíz)'} | nuevaFechaReserva=${registro.fechaReserva.toISOString()} duracionTotal=${registro.duracionTotal}min`);
+
+      // v1.0.62 — SERVICIO ENLAZADO: si ha cambiado la hora de INICIO de
+      // la cita, la otra se desplaza lo mismo. Cambiar solo de columna o
+      // mover una fase que no es la primera no la toca.
+      const deltaInicio = Number.isFinite(inicioAntesMs) ? (minStart - inicioAntesMs) : 0;
+      const enlazadasMovidas = await moverHermanasEnlazadas(registro, reservaId, deltaInicio);
+
       return {
         ok: true,
         reservaId,
         faseIndex: idx,
         fechaReserva: registro.fechaReserva.toISOString(),
-        duracionTotal: registro.duracionTotal
+        duracionTotal: registro.duracionTotal,
+        enlazadasMovidas
       };
     } catch (e) {
       console.error(`${TAG} ❌ moverFase:`, e.message);

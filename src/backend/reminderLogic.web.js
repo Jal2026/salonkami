@@ -1,5 +1,5 @@
 // =====================================================
-// [ReminderJob v1.11.0] - reminderLogic.web.js
+// [ReminderJob v1.12.2] - reminderLogic.web.js
 // Recordatorios automáticos 24h antes de la cita
 // FUENTE V2: KamisuiteReservations (fuente de verdad de reservas)
 // Email: Wix Triggered VGPVvYO (cascada) o Brevo (plantilla CMS)
@@ -31,10 +31,44 @@
 //    · brevoLogic.enviarEmailPlantilla (plantilla reminderLayout).
 //    · sugerenciasProductosLogic.construirBloqueProductos (v1.0.0) →
 //      bloque de sugerencias de producto del recordatorio.
+//    · smartPricingLogic (v1.0.0, import dinámico) → descuento automático
+//      de cada cita (oferta grabada o promo de catálogo) para el importe
+//      neto y el aviso del recordatorio.
 //    · wix-crm-backend triggeredEmails (plantilla VGPVvYO).
 //  FLUJO DE PUNTA A PUNTA: verificado. Ya NO hay tramo muerto.
 //
 // CHANGELOG:
+//   v1.12.2 - Cita enlazada (23-oct-2026). Un servicio con servicio
+//             enlazado crea dos citas a la misma hora (recepcionProLogic
+//             v1.0.62, campo grupoEnlazado). La agrupación por cliente ya
+//             las juntaba en un solo recordatorio, pero:
+//             · el importe era el de UNA de las dos → ahora, si la cita que
+//               da el importe es de un grupo enlazado, se suman las del
+//               grupo (cada una ya con su descuento automático);
+//             · la hora final era la de la cita que empieza la última, que
+//               con dos citas a la misma hora puede ser la que acaba antes
+//               → ahora es la del que acaba más tarde.
+//             Sin cita enlazada, el recordatorio es idéntico.
+//   v1.12.1 - Smart pricing: llamadas a smartPricingLogic con await
+//             (22-oct-2026). En Hair-Times las funciones normales de
+//             smartPricingLogic llegaban a otros archivos como promesa sin
+//             esperar (diagnóstico de widgetPublicoLogic 0.13.1). Aquí
+//             `campos`, `d` y el aviso eran promesas: el recordatorio nunca
+//             aplicaba el descuento. Ahora: await en camposOfertaReserva,
+//             descuentoAutomaticoReserva y textoAvisoDescuento, que en
+//             smartPricingLogic v1.0.6 son async. Nada más cambia.
+//   v1.12.0 - Smart pricing (fase 1, 21-oct-2026). Si la cita lleva
+//            descuento automático —la oferta grabada al reservar o la promo
+//            de catálogo, el MAYOR de los dos, nunca la suma, igual que
+//            cobra Recepción PRO—, el importe del recordatorio pasa a ser el
+//            NETO a pagar en el salón y se añade el aviso al final de
+//            «servicios» (una sola línea: vale para el email y para el
+//            WhatsApp sin tocar ninguna plantilla de Meta).
+//            · leerCitasV2 llama a aplicarDescuentoAutomaticoCitas al final,
+//              con UNA consulta al catálogo para todas las citas del día.
+//            · Import dinámico de smartPricingLogic dentro de try/catch: si
+//              falla, el recordatorio sale exactamente como en v1.11.0.
+//            · Sin descuento, importe y servicios no cambian en nada.
 //   v1.11.0 - Sugerencias de producto en el recordatorio (camino Brevo).
 //            · leerCitasV2 arrastra `group` de KamisuiteReservations
 //              (categoría del servicio principal, la escribe
@@ -250,7 +284,7 @@ import { enviarEmailPlantilla } from 'backend/brevoLogic.web.js';
 // v1.11.0: bloque de sugerencias de producto para el correo
 import { construirBloqueProductos } from 'backend/sugerenciasProductosLogic.web.js';
 
-const TAG = '[ReminderJob v1.11.0]';
+const TAG = '[ReminderJob v1.12.2]';
 
 // v1.7.0: colección fuente de verdad de reservas en V2
 const CMS_RESERVAS = 'KamisuiteReservations';
@@ -554,9 +588,15 @@ async function leerCitasV2(inicio, fin, fechaYMD) {
         importeTotal: r.precioTotal ? `${r.precioTotal} €` : '',
         estadoPago: r.status === 'PAGADO' ? 'Pagado' : 'Pago en salón',
         _startMs: start.getTime(),
-        _endMs: end.getTime()
+        _endMs: end.getTime(),
+        _grupoEnlazado: String(r.grupoEnlazado || ''),   // v1.12.2
+        _importeNum: Number(r.precioTotal) || 0,           // v1.12.2 — neto abajo si hay descuento
+        _reg: r   // v1.12.0 — registro original, solo para el descuento automático
       });
     }
+
+    // v1.12.0 — SMART PRICING: importe neto y aviso de descuento.
+    await aplicarDescuentoAutomaticoCitas(citas);
 
     console.log(`${TAG} 📅 Reservas V2 encontradas: ${citas.length} (bloqueos descartados: ${bloqueosFiltrados} | fuera del día: ${fueraDeDia})`);
     return citas;
@@ -564,6 +604,69 @@ async function leerCitasV2(inicio, fin, fechaYMD) {
   } catch (e) {
     console.error(`${TAG} ❌ Error leerCitasV2:`, e.message);
     return [];
+  }
+}
+
+// v1.12.0 — Fases de una reserva (campo Objeto {items:[...]}, JSON string
+// legacy o array directo). Mismo criterio defensivo que jsonIn de
+// recepcionProLogic.
+function _fasesDeReserva(r) {
+  let v = r ? r.fases : null;
+  if (v == null || v === '') return [];
+  if (typeof v === 'string') {
+    try { v = JSON.parse(v); } catch (e) { return []; }
+  }
+  if (Array.isArray(v)) return v;
+  if (v && Array.isArray(v.items)) return v.items;
+  return [];
+}
+
+// v1.12.0 — Importe en formato del recordatorio: entero sin decimales,
+// con decimales en formato español.
+function _importeES(n) {
+  const v = Math.round((Number(n) || 0) * 100) / 100;
+  return Number.isInteger(v) ? `${v} €` : `${v.toFixed(2).replace('.', ',')} €`;
+}
+
+// v1.12.0 — SMART PRICING. Para cada cita con descuento automático (el
+// mayor entre la oferta grabada y la promo de catálogo), importe NETO y
+// aviso al final de «servicios». No-blocking: ante cualquier fallo las
+// citas quedan como estaban.
+async function aplicarDescuentoAutomaticoCitas(citas) {
+  try {
+    if (!Array.isArray(citas) || !citas.length) return;
+    const sp = await import('backend/smartPricingLogic.web');
+    const campos = await sp.camposOfertaReserva();   // v1.12.1 — await
+    const uids = [];
+    for (const c of citas) {
+      for (const f of _fasesDeReserva(c._reg)) {
+        if (f && f.tipo === 'servicio' && f.setupUid) uids.push(f.setupUid);
+      }
+    }
+    const promoIdx = await sp.cargarIndicePromos(uids);
+    let conDescuento = 0;
+    for (const c of citas) {
+      const r = c._reg || {};
+      const precio = Number(r.precioTotal) || 0;
+      const d = await sp.descuentoAutomaticoReserva({   // v1.12.1 — await
+        fases: _fasesDeReserva(r),
+        ofertaPct: r[campos.pct],
+        ofertaAhorro: r[campos.ahorro],
+        promoIdx
+      });
+      if (d.importe > 0 && precio > 0) {
+        c.importeTotal = _importeES(Math.max(0, precio - d.importe));
+        c._importeNum = Math.max(0, precio - d.importe);   // v1.12.2
+        const aviso = await sp.textoAvisoDescuento(d.tipo, d.pct);   // v1.12.1 — await
+        if (aviso) c.servicios = c.servicios ? `${c.servicios} · ${aviso}` : aviso;
+        conDescuento++;
+      }
+    }
+    if (conDescuento) console.log(`${TAG} 🏷️ ${conDescuento} cita(s) con descuento automático en el recordatorio`);
+  } catch (e) {
+    console.warn(`${TAG} ⚠️ Descuento automático en recordatorio (no-blocking): ${e.message}`);
+  } finally {
+    for (const c of (citas || [])) delete c._reg;
   }
 }
 
@@ -728,8 +831,20 @@ function agruparPorCliente(citas) {
       : citasCliente.map(c => c.servicios).filter(Boolean).join(', ');
 
     const primeraHora = citasCliente[0].horaInicio;
-    const ultimaHora = citasCliente[citasCliente.length - 1].horaFinal;
-    const importe = citasCliente.find(c => c.importeTotal)?.importeTotal || '';
+    // v1.12.2 — la del que acaba más tarde (con dos citas a la misma hora,
+    // la última por inicio puede ser la que acaba antes).
+    const citaFin = citasCliente.reduce((a, c) => ((c._endMs || 0) > (a._endMs || 0) ? c : a), citasCliente[0]);
+    const ultimaHora = citaFin.horaFinal;
+    let importe = citasCliente.find(c => c.importeTotal)?.importeTotal || '';
+    // v1.12.2 — CITA ENLAZADA: si la cita que da el importe va en grupo,
+    // el importe es la suma del grupo.
+    const citaImporte = citasCliente.find(c => c.importeTotal);
+    if (citaImporte && citaImporte._grupoEnlazado) {
+      const delGrupo = citasCliente.filter(c => c._grupoEnlazado === citaImporte._grupoEnlazado);
+      if (delGrupo.length > 1) {
+        importe = _importeES(delGrupo.reduce((acc, c) => acc + (Number(c._importeNum) || 0), 0));
+      }
+    }
 
     const emailReal = citasCliente.find(c => !esEmailSalon(c.clientEmail) && c.clientEmail)?.clientEmail || '';
 
