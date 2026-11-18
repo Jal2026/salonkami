@@ -3,7 +3,167 @@
  * BUNDLE para Wix Custom Element (todo-en-uno)
  * =====================================================================
  * Tag name:  kami-reserva
- * VERSION:   2.0.25 (bundle)
+ * VERSION:   2.2.0 (bundle)
+ *
+ * v2.2.0 — SERVICIO ENLAZADO: DOS SERVICIOS A LA VEZ (23-oct-2026).
+ *   Caso Hair-Times: spa capilar + spa masaje de EMY a la vez, cada uno con
+ *   su profesional y su cobro. widgetPublicoLogic v0.14.0 manda en cada
+ *   servicio `enlazado` { setupUid, name, price, duration, promoPct,
+ *   smartPricing, idStaff } o null. Sin enlazado, todo es como en v2.1.7.
+ *     · Tarjeta y cabecera del servicio: «desde» con el precio cerrado (la
+ *       suma) y la duración del que acaba más tarde.
+ *     · _calc: el precio del enlazado entra en subtotal y total. Su
+ *       descuento es el mayor entre su promo y la oferta de la hora (esta
+ *       solo si su smart pricing está en ON), sobre su propio precio: lo
+ *       mismo que cobrará Recepción PRO en su cita. `saved` suma los dos.
+ *       `promo` y `esOferta` siguen siendo los del principal (son los que
+ *       decide el envío de la oferta vista). Nuevo `durationVista` = la
+ *       duración del que acaba más tarde, SOLO para mostrar: `duration`
+ *       sigue siendo la del principal, que es la que viaja al backend.
+ *     · Resumen y reserva confirmada: fila «A la vez» con el servicio
+ *       enlazado y su profesional (si solo hay uno asignado, o el que
+ *       devuelve la reserva). En la confirmada, el total es el del resumen.
+ *     · Panel de descuento: si solo se descuenta el principal, dice sobre
+ *       qué servicio es («Descuento (−10% en Spa capilar)»), porque el
+ *       porcentaje ya no es sobre el total de la reserva.
+ *     · La disponibilidad de las dos la decide el backend: no cambia nada
+ *       en peticiones ni en el envío de la reserva.
+ *
+ * v2.1.7 — COMPLEMENTO SI/NO OBLIGATORIO Y AVISO DEL CANDADO (22-oct-2026).
+ *   1) «Lavado previo» en Botox Capilar (Jal, Hair-Times). Un complemento
+ *      Si/No con `required` (fase obligatoria del mapeoFases, backend
+ *      widgetPublicoLogic) salia en «No» y con el boton No/Si. Hasta pulsar
+ *      «Si» el boton de reservar no se activaba (_complementosObligatorios
+ *      Ok exige `true`), y pulsarlo borraba la hora (_afterCompChange).
+ *        · _initState: un bool `required` arranca en `true`.
+ *        · _renderComplements: un bool `required` se pinta fijo en «Si»,
+ *          bloqueado, con «· obligatorio» en la etiqueta. Mismo pintado que
+ *          el obligado de pago de v2.0.23. Va despues de «incluido gratis»
+ *          y del obligado de pago, y antes del quitable con aviso: un
+ *          obligatorio no se puede quitar.
+ *        · Precio, duracion, envio y resumen no cambian: ya trataban el
+ *          bool en `true` como elegido, igual que cuando la clienta pulsaba
+ *          «Si».
+ *   2) El aviso «Elige una hora para completar tus datos» seguia visible
+ *      tras elegir hora: `.kr-locknote { display:flex }` anula el atributo
+ *      `hidden` que pone _updateLock. Nueva regla `.kr-locknote[hidden]`.
+ *
+ * v2.1.6 — SMART PRICING: TIRA ESTABLE Y PRECIO «DESDE» (22-oct-2026).
+ *   1) «A veces sale y otras no» (Jal, Hair-Times, hoy a las 22:15). La
+ *      tira solo pedia las ofertas de los demas dias si el dia ELEGIDO
+ *      volvia con horas. Un dia sin horas (hoy ya sin huecos, cerrado o
+ *      pasado) vuelve sin `smartPricing` y la tira perdia todos los −X %.
+ *        · La respuesta de horas solo ENCIENDE `_sp`; ya no lo apaga.
+ *        · `pedir-ofertas` se emite siempre tras cada respuesta de horas;
+ *          lo decide getOfertasDias (apagado → { activo:false } sin tocar
+ *          el motor). Sigue la regla de no repetir la misma consulta en
+ *          un minuto.
+ *        · La respuesta de varios dias fija `_sp` (activo y ventana). Si
+ *          con ella se conoce por primera vez la ventana, se vuelve a pedir
+ *          para incluir sus dias.
+ *   2) Precio «desde». Jal: si el dia tiene oferta y aun no hay hora
+ *      elegida, el precio y el total decian 99 € con las horas en −10 %
+ *      («el cliente va a desconfiar»). Ahora, con oferta en el dia y sin
+ *      hora: precio tachado y «desde 89,10 €» encima de las horas y en el
+ *      total (sin texto bajo «Total»: no cabe junto al tachado). Al elegir la hora,
+ *      todo queda como en v2.1.5.
+ *        · `_calc` devuelve `desde` { pct, saved, total } (o null). No
+ *          cambia total, saved ni promo: el envio de la reserva y la
+ *          confirmacion siguen igual.
+ *
+ * v2.1.5 — SMART PRICING: SIN «−X%» FANTASMA AL CAMBIAR DE DIA (22-oct-2026).
+ *   Jal: al pulsar el lunes, durante un instante su chip enseñaba el −10 %
+ *   y luego se quitaba. Causa: al pulsar un dia la tira se repinta al
+ *   momento, y para el dia elegido usaba `_ofertasDia`, que hasta que
+ *   llegan sus horas sigue siendo la del dia elegido ANTES.
+ *     · `_ofertasDiaFecha` guarda a que dia pertenece `_ofertasDia` (la
+ *       fecha de la respuesta de huecos).
+ *     · `_ofertasDelDia()` devuelve `_ofertasDia` solo si es del dia
+ *       elegido; si no, vacio. La usan la hora elegida, la propuesta y los
+ *       chips de hora.
+ *     · `_maxPctDia`: mientras no llegan las horas del dia nuevo, su chip
+ *       usa los datos de varios dias (`_ofertasDias`), que ya incluyen los
+ *       dias visibles. Asi enseña su propio −X % o nada, nunca el de otro.
+ *     · Solo cambia esa lectura; peticiones, calculo y pintado, como v2.1.4.
+ *
+ * v2.1.4 — SMART PRICING: MINI SELLO EN DIAS Y HORAS (22-oct-2026).
+ *   Jal vio la prueba de la tira de dias con el «−X%» dentro de una
+ *   pastilla y pidio llevarlo tambien a los chips de hora.
+ *     · `.kr-day__tag--oferta` y `.kr-hour__oferta` pasan de texto de color
+ *       a pastilla: fondo `--kr-accent-2` (el color que ya tenia el texto)
+ *       y letra `--kr-accent-ink`.
+ *     · Dia o hora elegidos: la pastilla se invierte. Dia: fondo
+ *       `--kr-orange-ink` y letra `--kr-orange-2`, igual que el sello del
+ *       aviso. Hora: fondo `--kr-green-ink-on` y letra `--kr-green`, los
+ *       colores del chip elegido.
+ *     · Solo CSS. El HTML de dias y horas es el de v2.1.2, sin tocar.
+ *
+ * v2.1.3 — SMART PRICING: AVISO DE OFERTA MAS VISIBLE (22-oct-2026).
+ *   Jal pidio un aviso mas llamativo y eligio la version en el color de
+ *   accion del salon (la de menos «colorin» de las dos que vio).
+ *     · Fondo en `--kr-orange` y texto en `--kr-orange-ink`: el mismo color
+ *       que el boton «Reservar» y el dia seleccionado de cada skin. Seis de
+ *       los siete skins usan el naranja por defecto; Azul Oceano lo
+ *       redefine en azul. Revisado en los siete: contraste correcto.
+ *     · Sello grande «−X%», titular «🎉 ¡Ahorra un X%!», dia y hora debajo,
+ *       y un boton ancho «Cambiar a viernes 23 · 16:00» en lugar del enlace
+ *       subrayado. Entra con las animaciones que ya tenia el bundle
+ *       (kr-rise y kr-pop).
+ *     · Solo cambia el render de la propuesta y su CSS. La logica (que hora
+ *       se propone, el salto de dia, la seleccion) es la de v2.1.2.
+ *
+ * v2.1.2 — SMART PRICING: OFERTAS POR DIA Y HORA (fase 1, 21-oct-2026).
+ *   Diseno aprobado por Jal («KAMISUITE — Smart Pricing · Diseno Fase 1»).
+ *   El precio va con el hueco: la clienta ve el descuento en el dia y en la
+ *   hora ANTES de elegir, y si elige una hora sin oferta se le propone la
+ *   hora con oferta mas cercana que tenga hueco libre.
+ *     · Horas: cada hora con oferta lleva «−X%». Llegan en `ofertas` de la
+ *       respuesta de huecos (widgetPublicoLogic v0.13.0).
+ *     · Tira de dias: insignia «−X%» en los dias con alguna hora LIBRE con
+ *       oferta. Llegan por el evento nuevo `pedir-ofertas` y el atributo
+ *       nuevo `data-ofertas-response` (page code v0.4.2).
+ *     · Propuesta: con una hora sin oferta elegida, se ofrece la hora con
+ *       oferta mas cercana dentro de la ventana (mismo dia o ±ventanaDias,
+ *       que viene de la version vigente). Un toque la selecciona.
+ *     · Precio: `_calc()` aplica la MAYOR entre la promo de catalogo y la
+ *       oferta de la hora elegida, nunca la suma, y solo sobre el precio
+ *       base (igual que la promo). Resumen y confirmacion reutilizan el
+ *       panel de la promo; cambia solo su titulo cuando gana la oferta.
+ *     · `reservar` envia `ofertaPct` (lo que la clienta vio). Si el servidor
+ *       ya no puede confirmarla devuelve 'OFERTA_CAMBIADA': se muestra su
+ *       mensaje y se refrescan horas y ofertas.
+ *   La seleccion de hora deja de comparar `textContent` (la hora puede
+ *   llevar la insignia dentro) y usa `data-hora`.
+ *   CSS nuevo, solo tres reglas y solo con tokens del skin activo:
+ *   `.kr-day__tag--oferta`, `.kr-hour__oferta` y `.kr-oferta-prop`.
+ *   Sin smart pricing encendido no llega ninguna oferta y el widget se ve y
+ *   funciona exactamente como en v2.1.1.
+ *
+ * v2.1.1 — Solo renumeracion. Contenido identico al 2.1.0 entregado el
+ *   30-sep-2026, que colisionaba con otro 2.1.0 entregado el 9-sep-2026
+ *   construido sobre el bundle 2.0.21. Este esta construido sobre 2.0.25.
+ *
+ * v2.1.0 — LA DURACION DE LA CITA LA DICE EL SERVIDOR.
+ *   Hasta aqui el widget sumaba en el navegador la duracion total
+ *   (baseDuration + variante + complementos) y el backend decidia con esa
+ *   cifra que horas ofrecer y si la reserva cabia antes del cierre. El front
+ *   no puede llegar al numero real: a un complemento con proceso propio el
+ *   motor le anade su bloque de PROCESO encima de la duracion seca, y al
+ *   elegir variante el front sustituye toda la duracion mientras el motor
+ *   sustituye solo la aplicacion y sigue montando la cascada. Caso real
+ *   28-sep-2026: tres lineas sumando 90 minutos en pantalla ocupando 170 en
+ *   la agenda, cita creada 17:30-20:20 con cierre a las 20:00.
+ *   Ahora el widget manda QUE ha elegido la clienta, no CUANTO cree que
+ *   dura: `complementosSetupUid` y `varianteSel` viajan tambien en
+ *   `pedir-huecos`, con el mismo formato exacto que ya viajaba en `reservar`.
+ *   El backend (widgetPublicoLogic v0.12.0) mide con el motor que construye
+ *   las fases y devuelve la duracion real en la respuesta de huecos.
+ *   La construccion de esos dos datos se extrae a `_buildComplementosPayload()`
+ *   y `_buildVarianteSel()`, usadas por los dos eventos, para que no puedan
+ *   describir cosas distintas. Incluye la regla de obligatorios quitables de
+ *   v2.0.24 sin cambiarla.
+ *   `durationMin` se sigue enviando por retrocompatibilidad. Ya no manda.
+ *   Pareja del page code `Servicios (Item)` v0.4.0.
  *
  * v2.0.21 — Imagenes redimensionadas en origen (rendimiento en movil 4G).
  *   Pareja del page code `Servicios (Item)` v0.3.6, que ahora envia dos
@@ -779,6 +939,7 @@ window.KR_STYLES = `
   padding: 12px 15px; border: 1px dashed var(--kr-line-2); border-radius: var(--kr-radius); background: var(--kr-surface-2);
 }
 .kr-locknote svg { width: 15px; height: 15px; flex: none; }
+.kr-locknote[hidden] { display: none; } /* v2.1.7 — display:flex anulaba hidden */
 .kr-sec.is-locked .kr-field,
 .kr-sec.is-locked .kr-actions { opacity: .45; transition: opacity var(--kr-dur) var(--kr-ease); }
 .kr-sec.is-locked .kr-field { pointer-events: none; }
@@ -1071,7 +1232,21 @@ window.KR_applySkin = function (el, name) {
 /* ============================================================================
    kr-widget.js — <kami-reserva> Custom Element (Shadow DOM)
    ----------------------------------------------------------------------------
-   VERSION: 2.0.25
+   VERSION: 2.2.0
+   v2.2.0 — Servicio enlazado a la vez: precio cerrado, fila «A la vez».
+   v2.1.7 — Complemento Si/No obligatorio fijo en «Si»; aviso del candado
+            oculto al elegir hora.
+   v2.1.6 — Tira de ofertas estable con dias sin horas; precio «desde».
+   v2.1.5 — Sin «−X%» fantasma en el chip del dia al cambiar de dia.
+   v2.1.4 — Mini sello «−X%» en dias y horas con oferta.
+   v2.1.3 — Aviso de oferta mas visible, en el color de accion del salon.
+   v2.1.2 — Smart pricing: insignias de oferta en dias y horas, propuesta de
+            cambio de hueco y precio con la mayor entre promo y oferta.
+   v2.1.1 — Renumeracion. Mismo contenido que el 2.1.0 del 30-sep, que
+            colisionaba con el 2.1.0 del 9-sep (hecho sobre 2.0.21).
+   v2.1.0 — La duracion la mide el servidor. El widget manda la composicion
+            elegida (complementos + variante) en `pedir-huecos` y pinta la
+            duracion que devuelve el backend en lugar de la suya.
    v2.0.25 — 🩹 ARRANQUE DEL QUITABLE + FRASES DE CONSECUENCIA.
      (A) FIX: un servicio quitable por regla inversa arrancaba en "No" porque
      _initState ponía todos los bool a false. Ahora arranca en "Sí" (puesto por
@@ -1288,7 +1463,7 @@ window.KR_applySkin = function (el, name) {
           También usa data-huecos-response y data-reserva-response para
           devolver resultados asíncronos. ─────────────────────────────── */
     static get observedAttributes() {
-      return ['data-config', 'data-huecos-response', 'data-reserva-response'];
+      return ['data-config', 'data-huecos-response', 'data-reserva-response', 'data-ofertas-response'];
     }
 
     constructor() {
@@ -1303,6 +1478,15 @@ window.KR_applySkin = function (el, name) {
       this._ready = false;
       this._pendingHuecosReqId = null;
       this._pendingReservaReqId = null;
+      // v2.1.2 — smart pricing
+      this._pendingOfertasReqId = null;
+      this._ofertasDia = {};      // { 'HH:MM': pct } del dia elegido
+      this._ofertasDiaFecha = null; // v2.1.5 — dia al que pertenece _ofertasDia
+      this._ofertasDias = {};     // { 'YYYY-MM-DD': [{hora, pct}] } resto de dias
+      this._sp = null;            // { activo, ventanaDias } o null
+      this._horaPendiente = null; // hora a seleccionar al llegar los huecos
+      this._ofertasClave = null;  // ultima consulta de ofertas (evita repetirla)
+      this._ofertasTs = 0;
       this.state = null;
     }
 
@@ -1329,6 +1513,8 @@ window.KR_applySkin = function (el, name) {
           this._handleHuecosResponse(parsed);
         } else if (name === 'data-reserva-response') {
           this._handleReservaResponse(parsed);
+        } else if (name === 'data-ofertas-response') {
+          this._handleOfertasResponse(parsed);
         }
       } catch (e) {
         console.error(`[kami-reserva v2.0] Error parsing ${name}:`, e.message);
@@ -1672,6 +1858,32 @@ window.KR_applySkin = function (el, name) {
           font-weight: var(--kr-w-bold);
           color: var(--kr-ink);
         }
+
+        /* v2.1.2 — Smart pricing. Solo tokens del skin activo.
+           v2.1.3 — Aviso de la propuesta en el color de accion del salon.
+           v2.1.4 — «−X%» de dias y horas como mini sello.
+           v2.1.6 — «desde» delante del precio con oferta. */
+        .kr-desde { font-size: 0.5em; font-weight: var(--kr-w-medium); color: var(--kr-ink-2); margin-right: 4px; letter-spacing: 0; }
+        .kr-day__tag--oferta { background: var(--kr-accent-2); color: var(--kr-accent-ink); font-weight: 800; font-size: 0.68rem; line-height: 1; padding: 3px 7px; border-radius: var(--kr-radius-pill); margin-top: 2px; }
+        .kr-day.is-sel .kr-day__tag--oferta { background: var(--kr-orange-ink); color: var(--kr-orange-2); opacity: 1; }
+        .kr-hour__oferta { display: inline-block; margin-left: 5px; padding: 3px 7px; border-radius: var(--kr-radius-pill); font-size: 0.78em; font-weight: 800; line-height: 1; vertical-align: 1px; background: var(--kr-accent-2); color: var(--kr-accent-ink); }
+        .kr-hour.is-sel .kr-hour__oferta { background: var(--kr-green-ink-on); color: var(--kr-green); }
+        .kr-oferta-prop {
+          margin-top: 16px; padding: 16px;
+          border-radius: var(--kr-radius);
+          background: var(--kr-orange);
+          color: var(--kr-orange-ink);
+          box-shadow: var(--kr-shadow-1);
+          animation: kr-rise .35s var(--kr-ease) both;
+        }
+        .kr-oferta-prop__pct { background: var(--kr-orange-ink); color: var(--kr-orange-2); }
+        .kr-oferta-prop__btn { background: var(--kr-orange-ink); color: var(--kr-orange-2); }
+        .kr-oferta-prop__top { display: flex; align-items: center; gap: 14px; }
+        .kr-oferta-prop__pct { flex: none; font-size: 26px; font-weight: 800; line-height: 1; padding: 10px 12px; border-radius: 14px; animation: kr-pop .5s var(--kr-ease) both; }
+        .kr-oferta-prop__t { font-size: 17px; font-weight: 800; line-height: 1.2; }
+        .kr-oferta-prop__d { font-size: 13.5px; font-weight: 600; margin-top: 3px; line-height: 1.3; }
+        .kr-oferta-prop__btn { appearance: none; width: 100%; margin-top: 14px; border: 0; border-radius: var(--kr-radius-pill); padding: 13px 16px; font-family: inherit; font-size: 14.5px; font-weight: 700; cursor: pointer; transition: transform var(--kr-dur) var(--kr-ease); }
+        .kr-oferta-prop__btn:hover { transform: translateY(-2px); }
       `;
     }
 
@@ -1693,7 +1905,8 @@ window.KR_applySkin = function (el, name) {
         if (r && r.inverso && r.permiteQuitar && r.entonces) quitInit.add(r.entonces);
       });
       (cfg.complements || []).forEach(c => {
-        if (c.type === "bool") comp[c.id] = quitInit.has(c.id) ? true : false;
+        // v2.1.7 — un bool obligatorio (required) arranca en "Sí".
+        if (c.type === "bool") comp[c.id] = (quitInit.has(c.id) || c.required === true) ? true : false;
         else comp[c.id] = (c.default || c.options[0].id);
       });
       this.state = {
@@ -1731,6 +1944,14 @@ window.KR_applySkin = function (el, name) {
         //   Desktop v1.1.43.
         variantIdx: -1
       };
+      // v2.1.2 — Las ofertas dependen del servicio: se vacian al cambiarlo.
+      this._ofertasDia = {};
+      this._ofertasDiaFecha = null;   // v2.1.5
+      this._ofertasDias = {};
+      this._sp = null;
+      this._horaPendiente = null;
+      this._pendingOfertasReqId = null;
+      this._ofertasClave = null;
       this._build();
       this._applyPrefill();
       this._recompute(true);
@@ -1778,14 +1999,23 @@ window.KR_applySkin = function (el, name) {
         body.appendChild(el('h3', 'kr-svc-card__name', svc.name || ''));
         if (svc.description) body.appendChild(el('p', 'kr-svc-card__desc', svc.description));
         const meta = el('div', 'kr-svc-card__meta');
-        if (svc.basePrice != null) {
+        // v2.2.0 — Con servicio enlazado: precio cerrado (la suma) y la
+        // duración del que acaba más tarde.
+        const enlCard = (svc.enlazado && svc.enlazado.setupUid) ? svc.enlazado : null;
+        const precioCard = enlCard
+          ? ((svc.basePrice != null ? svc.basePrice : 0) + (Number(enlCard.price) || 0))
+          : svc.basePrice;
+        const durCard = enlCard
+          ? Math.max(Number(svc.baseDuration) || 0, Number(enlCard.duration) || 0)
+          : svc.baseDuration;
+        if (precioCard != null && (!enlCard || precioCard > 0)) {
           meta.innerHTML =
-            `<span class="kr-svc-card__price">desde ${EUR(svc.basePrice)}</span> ` +
-            `<span>· ${durTxt(svc.baseDuration)}</span>`;
+            `<span class="kr-svc-card__price">desde ${EUR(precioCard)}</span> ` +
+            `<span>· ${durTxt(durCard)}</span>`;
         } else {
           meta.innerHTML =
             `<span class="kr-svc-card__price kr-svc-card__price--tbd">A valorar</span> ` +
-            `<span>· ${durTxt(svc.baseDuration)}</span>`;
+            `<span>· ${durTxt(durCard)}</span>`;
         }
         body.appendChild(meta);
         card.appendChild(body);
@@ -1839,10 +2069,86 @@ window.KR_applySkin = function (el, name) {
     // Emite el evento custom 'pedir-huecos' hacia el page code de Wix.
     // El page code llamará a getHuecosDisponibles y devolverá la respuesta
     // vía setAttribute('data-huecos-response', JSON).
+    /* ---- v2.1.0 · composicion elegida (misma para huecos y para reserva) ----
+       Estos dos metodos son la UNICA descripcion de lo que la clienta ha
+       elegido. Los usan tanto `pedir-huecos` como `reservar`, para que el
+       servidor mida exactamente la misma cita que luego va a crear.
+       Extraidos tal cual del manejador de reserva, sin cambiar una coma:
+       incluida la regla de obligatorios quitables de v2.0.24. */
+    _buildComplementosPayload() {
+      const cfg = this._service;
+      if (!cfg || !this.state) return [];
+      const _obligQuitPayload = this._obligadosQuitables();
+      return (cfg.complements || []).reduce((acc, c) => {
+        const v = this.state.comp[c.id];
+        if (c.type === 'bool') {
+          // v2.0.24 — quitable por regla inversa: va en el envío por defecto,
+          // salvo que el cliente lo haya quitado (state === false). Así el
+          // motor lo cobra por la vía normal si el cliente lo deja puesto.
+          if (_obligQuitPayload.has(c.id)) { if (v !== false) acc.push(c.id); }
+          else if (v) acc.push(c.id);
+        } else if (c.type === 'exclusive') {
+          if (v && v !== 'none') {
+            const o = (c.options || []).find(o => o.id === v);
+            if (o) {
+              acc.push({
+                uid: o.id,                  // setupUid del servicio elegido
+                varianteId: o.id,
+                varianteLabel: o.label || '',
+                price: (o.price == null ? null : Number(o.price)),
+                duration: Number(o.duration) || 0
+              });
+            }
+          }
+        } else {
+          // choice
+          if (v && v !== 'none') {
+            const o = (c.options || []).find(o => o.id === v);
+            if (o) {
+              acc.push({
+                uid: c.id,
+                varianteId: o.id,
+                varianteLabel: o.label || '',
+                price: (o.price == null ? null : Number(o.price)),
+                duration: Number(o.duration) || 0
+              });
+            }
+          }
+        }
+        return acc;
+      }, []);
+    }
+
+    _buildVarianteSel() {
+      const cfg = this._service;
+      if (!cfg || !this.state) return null;
+      let varianteSel = null;
+      if (cfg.hasVariants && Array.isArray(cfg.variantes)) {
+        const idx = this.state.variantIdx;
+        if (Number.isInteger(idx) && idx >= 0 && idx < cfg.variantes.length) {
+          const v = cfg.variantes[idx];
+          if (v && typeof v === 'object') {
+            const vLabel = v.label || v.nombre || '';
+            const vPriceRaw = (v.precio != null ? v.precio : v.price);
+            const vDurRaw = (v.duracion != null ? v.duracion : v.duration);
+            const vPrice = (vPriceRaw != null) ? Number(vPriceRaw) : 0;
+            const vDur = (vDurRaw != null) ? Number(vDurRaw) : 0;
+            varianteSel = { idx, label: vLabel, price: vPrice, duration: vDur };
+          }
+        }
+      }
+      return varianteSel;
+    }
+
     _emitirPedirHuecos() {
       if (!this.state || !this._selectedService) return;
       const day = this._dayById(this.state.dayId);
       if (!day) return;
+      // v2.1.0 — La duracion medida por el servidor deja de valer en cuanto
+      // se pregunta por una configuracion nueva. Se borra ANTES de calcular,
+      // para que `durationMin` viaje con la estimacion local y para no pintar
+      // en pantalla la cifra de la consulta anterior.
+      this._durServidor = null;
       const calc = this._calc();
       const reqId = this._newReqId();
       this._pendingHuecosReqId = reqId;
@@ -1855,7 +2161,15 @@ window.KR_applySkin = function (el, name) {
           requestId: reqId,
           fecha: day.id,
           proId: this.state.proMain,
+          // v2.1.0 — Referencia, ya no decide. El backend v0.12.0 mide con la
+          // composicion de las dos lineas siguientes. Se mantiene por
+          // retrocompatibilidad con page codes anteriores a v0.4.0.
           durationMin: calc.duration,
+          // v2.1.0 — QUE ha elegido la clienta, con el mismo formato exacto
+          // que viaja en el evento `reservar`. Con esto el servidor mide la
+          // cita en vez de creerse la suma del navegador.
+          complementosSetupUid: this._buildComplementosPayload(),
+          varianteSel: this._buildVarianteSel(),
           // v2.0.17 — Segundo profesional para los complementos. Cuando va
           // informado, el backend (widgetPublicoLogic v0.9.0) parte la cita
           // en dos tramos y valida cada uno contra su profesional. Vacío →
@@ -1877,6 +2191,22 @@ window.KR_applySkin = function (el, name) {
       if (res && res.requestId && res.requestId !== this._pendingHuecosReqId) return;
 
       this.state.loadingHuecos = false;
+      // v2.1.0 — Duracion REAL medida por el backend para esta configuracion.
+      // Manda sobre la suma local en `_calc()`, asi que la pantalla dice lo
+      // mismo que el motor que ha filtrado las horas. Si el backend no la
+      // envia (page code anterior a v0.4.0), se queda en null y todo sigue
+      // funcionando con la estimacion local.
+      {
+        const dSrv = Number(res && res.durationMin);
+        this._durServidor = (res && res.ok && Number.isFinite(dSrv) && dSrv > 0) ? dSrv : null;
+      }
+      // v2.1.2 — Smart pricing del dia pedido (vacio si esta apagado).
+      this._ofertasDia = (res && res.ok && res.ofertas && typeof res.ofertas === 'object') ? res.ofertas : {};
+      // v2.1.5 — La respuesta es la del ultimo dia pedido (ver requestId).
+      this._ofertasDiaFecha = (res && res.fecha) || this.state.dayId;
+      // v2.1.6 — Un dia sin horas llega sin smart pricing: eso NO lo apaga.
+      // El estado lo fija la respuesta de varios dias (_handleOfertasResponse).
+      if (res && res.ok && res.smartPricing && res.smartPricing.activo) this._sp = res.smartPricing;
       // v2.0.4 — Estado "cerrado": el salón no abre ese día.
       // El backend lo señaliza con motivo:'cerrado' (huecos:[]).
       this.state.salonCerrado = res && res.ok && res.motivo === 'cerrado';
@@ -1886,6 +2216,11 @@ window.KR_applySkin = function (el, name) {
       } else {
         this.state.availableHuecos = [];
         this.state.huecosError = !res?.ok;
+      }
+      // v2.1.2 — Hora pedida desde la propuesta de oferta (cambio de dia).
+      if (this._horaPendiente) {
+        if (this.state.availableHuecos.includes(this._horaPendiente)) this.state.hour = this._horaPendiente;
+        this._horaPendiente = null;
       }
       // Si la hora elegida ya no está disponible, la deseleccionamos
       if (this.state.hour && !this.state.availableHuecos.includes(this.state.hour)) {
@@ -1899,6 +2234,195 @@ window.KR_applySkin = function (el, name) {
       this._renderHours(eff, this.state.availableHuecos, calc);
       this._renderActions();
       this._renderSummary();
+      // v2.1.2 — Insignia del dia elegido, ofertas del resto y propuesta.
+      // v2.1.6 — Siempre: getOfertasDias dice si esta encendido.
+      this._emitirPedirOfertas();
+      this._renderDays();
+      requestAnimationFrame(() => this._updateFades());
+      this._renderPropuesta();
+    }
+
+    /* =================================================================
+       v2.1.2 — SMART PRICING (ofertas por dia y hora)
+       ================================================================= */
+
+    // v2.1.5 — Ofertas del dia elegido solo si ya son SUYAS (si no, vacio).
+    _ofertasDelDia() {
+      if (!this.state || this._ofertasDiaFecha !== this.state.dayId) return {};
+      return this._ofertasDia || {};
+    }
+
+    // Porcentaje de oferta de la hora elegida (0 si no hay).
+    _ofertaPctHoraSel() {
+      if (!this._config || !this.state || !this.state.hour) return 0;
+      const v = Number(this._ofertasDelDia()[this.state.hour]);
+      return (Number.isFinite(v) && v > 0) ? v : 0;
+    }
+
+    // Mayor oferta con hora libre de un dia (insignia de la tira).
+    _maxPctDia(id) {
+      if (!this._sp || !this._sp.activo) return 0;
+      let max = 0;
+      // v2.1.5 — El dia elegido usa sus horas solo cuando ya han llegado.
+      if (this.state && id === this.state.dayId && this._ofertasDiaFecha === id) {
+        Object.values(this._ofertasDia || {}).forEach(p => { const n = Number(p); if (n > max) max = n; });
+      } else {
+        ((this._ofertasDias || {})[id] || []).forEach(o => { const n = Number(o && o.pct); if (n > max) max = n; });
+      }
+      return max;
+    }
+
+    _isoSumarDias(iso, n) {
+      const [y, m, d] = String(iso).split("-").map(Number);
+      const dt = new Date(y, m - 1, d);
+      dt.setDate(dt.getDate() + n);
+      return `${dt.getFullYear()}-${pad2(dt.getMonth() + 1)}-${pad2(dt.getDate())}`;
+    }
+
+    _diasEntre(a, b) {
+      const [ya, ma, da] = String(a).split("-").map(Number);
+      const [yb, mb, db] = String(b).split("-").map(Number);
+      return Math.round((Date.UTC(yb, mb - 1, db) - Date.UTC(ya, ma - 1, da)) / 86400000);
+    }
+
+    _hhmmMin(s) {
+      const m = String(s || "").match(/^(\d{1,2}):(\d{2})$/);
+      return m ? (+m[1]) * 60 + (+m[2]) : null;
+    }
+
+    // Pide las horas libres con oferta de los dias visibles y de la ventana
+    // alrededor del dia elegido. Mismos datos de composicion que pedir-huecos.
+    _emitirPedirOfertas() {
+      if (!this._config || !this.state || !this._selectedService) return;
+      const sel = this.state.dayId;
+      // v2.1.6 — Sin estado conocido aun: solo los dias visibles.
+      const ventana = (this._sp && this._sp.activo) ? Math.max(0, Number(this._sp.ventanaDias) || 0) : 0;
+      const fechas = new Set((this.days || []).map(d => d.id));
+      for (let i = -ventana; i <= ventana; i++) {
+        if (i !== 0) fechas.add(this._isoSumarDias(sel, i));
+      }
+      // Nada anterior a hoy: el motor no ofrece horas pasadas.
+      const hoyIso = this._isoToday();
+      [...fechas].forEach(f => { if (f < hoyIso) fechas.delete(f); });
+      const calc = this._calc();
+      const detail = {
+        fechas: [...fechas].sort(),
+        proId: this.state.proMain,
+        durationMin: calc.duration,
+        complementosSetupUid: this._buildComplementosPayload(),
+        varianteSel: this._buildVarianteSel(),
+        proExtraId: this._proExtraEnvio(),
+        principalSetupUid: (this._service && this._service.setupUid) || "",
+        idStaffPermitidos: Array.isArray(this._service.idStaff) ? this._service.idStaff : []
+      };
+      // Misma consulta en el ultimo minuto → no se repite. Cambiar de dia
+      // dentro de la tira no cambia la lista de fechas en la mayoria de los
+      // casos, asi que no dispara otra consulta al motor.
+      const clave = JSON.stringify(detail);
+      if (clave === this._ofertasClave && (Date.now() - (this._ofertasTs || 0)) < 60000) return;
+      this._ofertasClave = clave;
+      this._ofertasTs = Date.now();
+      const reqId = this._newReqId();
+      this._pendingOfertasReqId = reqId;
+      this.dispatchEvent(new CustomEvent('pedir-ofertas', {
+        bubbles: true, composed: true,
+        detail: Object.assign({ requestId: reqId }, detail)
+      }));
+    }
+
+    _handleOfertasResponse(res) {
+      if (!this.state) return;
+      if (res && res.requestId && res.requestId !== this._pendingOfertasReqId) return;
+      // v2.1.6 — Esta respuesta fija el estado del smart pricing (activo y
+      // ventana). Un fallo de red no lo cambia.
+      const habiaSp = !!(this._sp && this._sp.activo);
+      const activo = !!(res && res.ok && res.activo);
+      if (res && res.ok) this._sp = activo ? { activo: true, ventanaDias: Number(res.ventanaDias) || 0 } : null;
+      this._ofertasDias = (activo && res.dias && typeof res.dias === 'object') ? res.dias : {};
+      // Si la consulta fallo, se permite repetirla en el siguiente cambio.
+      if (!(res && res.ok)) this._ofertasClave = null;
+      this._renderDays();
+      requestAnimationFrame(() => this._updateFades());
+      this._renderPropuesta();
+      // v2.1.6 — Primera vez que se conoce la ventana: pedir sus dias.
+      if (activo && !habiaSp && this._sp.ventanaDias > 0) this._emitirPedirOfertas();
+    }
+
+    // Hora con oferta mas cercana a la elegida dentro de la ventana. Solo
+    // cuando la hora elegida no lleva oferta. Cercania = dias de distancia
+    // y, a igualdad, minutos de distancia; a igualdad, mayor descuento.
+    _mejorPropuesta() {
+      if (!this._sp || !this._sp.activo || !this.state || !this.state.hour) return null;
+      if (this._ofertaPctHoraSel() > 0) return null;
+      const sel = this.state.dayId;
+      const ventana = Math.max(0, Number(this._sp.ventanaDias) || 0);
+      const horaSel = this._hhmmMin(this.state.hour);
+      if (horaSel == null) return null;
+      const cands = [];
+      Object.entries(this._ofertasDelDia()).forEach(([h, p]) => cands.push({ fecha: sel, hora: h, pct: Number(p) }));
+      Object.entries(this._ofertasDias || {}).forEach(([f, arr]) => {
+        if (f === sel) return;
+        (Array.isArray(arr) ? arr : []).forEach(o => cands.push({ fecha: f, hora: o && o.hora, pct: Number(o && o.pct) }));
+      });
+      let mejor = null, mejorKey = Infinity;
+      for (const c of cands) {
+        if (!(c.pct > 0)) continue;
+        const dd = Math.abs(this._diasEntre(sel, c.fecha));
+        if (dd > ventana) continue;
+        const hm = this._hhmmMin(c.hora);
+        if (hm == null) continue;
+        const key = dd * 1440 + Math.abs(hm - horaSel);
+        if (key < mejorKey || (key === mejorKey && mejor && c.pct > mejor.pct)) { mejor = c; mejorKey = key; }
+      }
+      return mejor;
+    }
+
+    _renderPropuesta() {
+      const box = this.propRegion;
+      if (!box) return;
+      const p = this._mejorPropuesta();
+      if (!p) { box.innerHTML = ""; return; }
+      const DIA_LARGO = ["domingo", "lunes", "martes", "miércoles", "jueves", "viernes", "sábado"];
+      const [y, m, d] = p.fecha.split("-").map(Number);
+      const dt = new Date(y, m - 1, d);
+      const diaTxt = p.fecha === this.state.dayId ? "este mismo día" : `el ${DIA_LARGO[dt.getDay()]} ${d}`;
+      const diaBtn = p.fecha === this.state.dayId ? "" : `${DIA_LARGO[dt.getDay()]} ${d} · `;
+      box.innerHTML = `<div class="kr-oferta-prop">
+          <div class="kr-oferta-prop__top">
+            <div class="kr-oferta-prop__pct">−${p.pct}%</div>
+            <div class="kr-oferta-prop__txt">
+              <div class="kr-oferta-prop__t">🎉 ¡Ahorra un ${p.pct}%!</div>
+              <div class="kr-oferta-prop__d">Si reservas ${diaTxt} a las ${p.hora}</div>
+            </div>
+          </div>
+          <button class="kr-oferta-prop__btn" type="button">Cambiar a ${diaBtn}${p.hora}</button>
+        </div>`;
+      box.querySelector(".kr-oferta-prop__btn").addEventListener("click", () => this._irAPropuesta(p));
+    }
+
+    _irAPropuesta(p) {
+      if (!this.state || !p) return;
+      if (p.fecha === this.state.dayId) {
+        this.state.hour = p.hora;
+        this._repaintHoras();
+        return;
+      }
+      this._horaPendiente = p.hora;
+      if ((this.days || []).find(d => d.id === p.fecha)) {
+        this.state.dayId = p.fecha; this.state.hour = null;
+        this._renderDays(); this._recompute(true); this._renderActions(); this._renderSummary();
+      } else {
+        this._jumpToDate(p.fecha);
+      }
+    }
+
+    // Repinta lo que depende de la hora elegida sin volver a pedir huecos.
+    _repaintHoras() {
+      const r = this.hoursRegion;
+      if (r) r.querySelectorAll(".kr-hour").forEach(x => x.classList.toggle("is-sel", x.dataset.hora === this.state.hour));
+      const n = Array.isArray(this.state.availableHuecos) ? this.state.availableHuecos.length : 0;
+      if (this._config) this._renderHoursHead(this._calc(), n);
+      this._renderActions(); this._renderSummary(); this._renderPropuesta();
     }
 
     /* =================================================================
@@ -1930,12 +2454,20 @@ window.KR_applySkin = function (el, name) {
           data: this._lastContactData || {},
           calc: this._calc(),
           reservaId: res.reservaId || null,
-          precioTotal: res.precioTotal || null
+          precioTotal: res.precioTotal || null,
+          enlazada: res.enlazada || null   // v2.2.0 — cita enlazada creada a la vez
         };
         this._renderConfirm();
       } else {
         this.state.submitError = (res && res.error) || 'No se ha podido completar la reserva.';
         this._renderActions();
+        // v2.1.2 — La oferta vista ya no vale: se refrescan horas y ofertas.
+        if (res && res.codigo === 'OFERTA_CAMBIADA') {
+          this.state.hour = null;
+          this._ofertasClave = null;
+          this._recompute(true);
+          this._renderSummary();
+        }
       }
     }
 
@@ -2178,6 +2710,11 @@ window.KR_applySkin = function (el, name) {
       // depilación con importe, `price` deja de ser 0 y el widget pasa
       // a mostrar la cifra real en resumen, bloque de precio, botón
       // primario y confirmación.
+      // v2.2.0 — SERVICIO ENLAZADO: su precio entra en el precio cerrado.
+      const enlCfg = this._enlazado();
+      const enlPrice = enlCfg ? (Number(enlCfg.price) || 0) : 0;
+      price += enlPrice;
+
       const tbd = unknown || price <= 0;
       // v2.0.10 — El descuento promocional se aplica SOLO al precio base
       // del servicio principal, NO a los complementos. Paridad estricta
@@ -2198,12 +2735,54 @@ window.KR_applySkin = function (el, name) {
       // al precio final en el resumen y en la cabecera de horas, más un
       // badge "−X%" junto al nombre. Se publica `promo` sólo si el
       // ahorro real es apreciable; si no, 0 y ningún render lo pinta.
-      const promoRaw = (tbd || !cfg.promoPct) ? 0 : cfg.promoPct;
+      // v2.1.2 — SMART PRICING. La oferta de la hora elegida compite con la
+      // promo de catalogo: se aplica la MAYOR, nunca la suma, y sobre el
+      // mismo precio base. El backend solo manda ofertas que superan la
+      // promo, asi que `esOferta` marca cuando gana la oferta.
+      const promoCfg = Number(cfg.promoPct) || 0;
+      const ofertaHora = this._ofertaPctHoraSel();
+      const promoEfectivo = Math.max(promoCfg, ofertaHora);
+      const promoRaw = (tbd || !promoEfectivo) ? 0 : promoEfectivo;
       const promoBase = (promoRaw && cfg.basePrice != null) ? cfg.basePrice : 0;
       const saved = promoRaw ? Math.round(promoBase * (promoRaw / 100) * 100) / 100 : 0;
       const promo = (saved > 0.005) ? promoRaw : 0;
-      const total = Math.round((price - saved) * 100) / 100;
-      return { subtotal: price, total, saved, promo, duration: dur, tbd };
+      // v2.2.0 — Descuento del enlazado: el mayor entre su promo y la oferta
+      // de la hora (esta solo si su smart pricing está en ON), sobre su
+      // propio precio. Es lo que cobrará Recepción PRO en su cita.
+      const enlPct = enlCfg
+        ? Math.max(Number(enlCfg.promoPct) || 0, (enlCfg.smartPricing && ofertaHora > 0) ? ofertaHora : 0)
+        : 0;
+      const enlSaved = (!tbd && enlPct > 0 && enlPrice > 0) ? Math.round(enlPrice * (enlPct / 100) * 100) / 100 : 0;
+      const total = Math.round((price - saved - enlSaved) * 100) / 100;
+      // v2.1.0 — Si el backend ya ha medido esta configuracion, su cifra es
+      // la que vale: sale del motor que construye las fases. `_durServidor`
+      // se pone a null en cuanto se pide una consulta nueva, asi que
+      // mientras se espera se muestra la estimacion local y nunca una cifra
+      // de una configuracion anterior. `durationLocal` conserva la suma del
+      // front por si alguna vista la necesita.
+      const durServidor = Number(this._durServidor);
+      const durFinal = (Number.isFinite(durServidor) && durServidor > 0) ? durServidor : dur;
+      // v2.2.0 — Solo para mostrar: la del que acaba más tarde.
+      const durVista = Math.max(durFinal, enlCfg ? (Number(enlCfg.duration) || 0) : 0);
+      // v2.1.6 — «desde»: el dia elegido tiene horas con oferta y aun no hay
+      // hora. Mayor oferta del dia sobre el precio base, igual que arriba.
+      // Solo para mostrar: total, saved y promo no cambian.
+      let desde = null;
+      if (!tbd && !(this.state && this.state.hour) && cfg.basePrice != null) {
+        let maxDia = 0;
+        Object.values(this._ofertasDelDia()).forEach(p => { const n = Number(p); if (n > maxDia) maxDia = n; });
+        if (maxDia > promoCfg) {
+          const savedD = Math.round(cfg.basePrice * (maxDia / 100) * 100) / 100;
+          // v2.2.0 — el enlazado con su propio descuento a ese porcentaje
+          const enlPctD = enlCfg ? Math.max(Number(enlCfg.promoPct) || 0, enlCfg.smartPricing ? maxDia : 0) : 0;
+          const enlSavedD = (enlPctD > 0 && enlPrice > 0) ? Math.round(enlPrice * (enlPctD / 100) * 100) / 100 : 0;
+          if (savedD > 0.005) desde = { pct: maxDia, saved: Math.round((savedD + enlSavedD) * 100) / 100, total: Math.round((price - savedD - enlSavedD) * 100) / 100 };
+        }
+      }
+      return { subtotal: price, total, saved: Math.round((saved + enlSaved) * 100) / 100, promo, duration: durFinal, durationLocal: dur, tbd,
+               durationVista: durVista,   // v2.2.0
+               savedEnl: enlSaved,        // v2.2.0 — ahorro solo del enlazado
+               esOferta: promo > 0 && ofertaHora > promoCfg, desde };
     }
 
     _slotsFor(day, duration) {
@@ -2307,7 +2886,8 @@ window.KR_applySkin = function (el, name) {
         "Huecos reales para la configuración de arriba.", "horas");
       this.hoursHead = el("div", "kr-hours-head");
       this.hoursRegion = el("div");
-      cSec.append(this.hoursHead, this.hoursRegion);
+      this.propRegion = el("div");   // v2.1.2 — propuesta de hora con oferta
+      cSec.append(this.hoursHead, this.hoursRegion, this.propRegion);
       this.flow.appendChild(cSec);
 
       /* ---- Resumen · espejo pasivo: inline en el flujo (móvil) + rail (escritorio).
@@ -2395,8 +2975,16 @@ window.KR_applySkin = function (el, name) {
       }
       // Línea de metadatos (precio + duración + promo)
       const meta = el('div', 'kr-svc-header__meta');
-      if (cfg.basePrice != null) {
-        const price = el('span', 'kr-svc-header__price'); price.textContent = `desde ${EUR(cfg.basePrice).replace(/\u00A0/g,' ')}`;
+      // v2.2.0 — Con servicio enlazado: precio cerrado y duración mayor.
+      const enlHead = this._enlazado();
+      const precioHead = enlHead
+        ? ((cfg.basePrice != null ? cfg.basePrice : 0) + (Number(enlHead.price) || 0))
+        : cfg.basePrice;
+      const durHead = enlHead
+        ? Math.max(Number(cfg.baseDuration) || 0, Number(enlHead.duration) || 0)
+        : cfg.baseDuration;
+      if (precioHead != null && (!enlHead || precioHead > 0)) {
+        const price = el('span', 'kr-svc-header__price'); price.textContent = `desde ${EUR(precioHead).replace(/\u00A0/g,' ')}`;
         meta.appendChild(price);
         if (cfg.promoPct) {
           const promo = el('span', 'kr-svc-header__promo');
@@ -2412,7 +3000,7 @@ window.KR_applySkin = function (el, name) {
         meta.appendChild(price);
       }
       meta.appendChild(el('span', 'kr-svc-header__dot'));
-      const dur = el('span', 'kr-svc-header__dur'); dur.textContent = `≈ ${durTxt(cfg.baseDuration).replace(/\u00A0/g,' ')}`;
+      const dur = el('span', 'kr-svc-header__dur'); dur.textContent = `≈ ${durTxt(durHead).replace(/\u00A0/g,' ')}`;
       meta.appendChild(dur);
       body.appendChild(meta);
       head.appendChild(body);
@@ -2441,9 +3029,11 @@ window.KR_applySkin = function (el, name) {
         }
         const b = el("button", "kr-day" + (d.id === this.state.dayId ? " is-sel" : "") + (d.full ? " is-full" : ""));
         b.type = "button";
+        // v2.1.2 — Dia con alguna hora libre con oferta → «−X%».
+        const pctD = d.full ? 0 : this._maxPctDia(d.id);
         b.innerHTML = `<span class="kr-day__dow">${d.dow}</span>
           <span class="kr-day__num">${d.num}</span>
-          <span class="kr-day__tag">${d.full ? "completo" : d.tag}</span>`;
+          <span class="kr-day__tag${pctD > 0 ? " kr-day__tag--oferta" : ""}">${d.full ? "completo" : (pctD > 0 ? `−${pctD}%` : d.tag)}</span>`;
         if (!d.full) b.addEventListener("click", () => {
           this.state.dayId = d.id; this.state.hour = null;
           this._renderDays(); this._recompute(true); this._renderActions(); this._renderSummary();
@@ -2612,6 +3202,21 @@ window.KR_applySkin = function (el, name) {
             // v2.0.23 — Obligado de pago (mitad inversa, A no elegido): se
             // muestra seleccionado y bloqueado, con su precio. La clienta no
             // lo puede quitar. Reutiliza las clases del propio CSS.
+            const lab = el("label", "kr-label", c.label
+              + (c.price ? ` <small>· +${EUR(c.price)} · obligatorio</small>` : ` <small>· obligatorio</small>`)
+              + (c.hint ? ` <small>· ${c.hint}</small>` : ""));
+            field.appendChild(lab);
+            const seg = el("div", "kr-seg");
+            const b = el("button", "kr-seg__opt is-sel", "Sí");
+            b.type = "button";
+            b.disabled = true;
+            seg.appendChild(b);
+            field.appendChild(seg);
+          } else if (c.required === true) {
+            // v2.1.7 — Bool obligatorio (fase obligatoria del mapeoFases):
+            // fijo en "Sí" y bloqueado, mismo pintado que el obligado de
+            // pago. Su estado ya arranca en true (_initState).
+            this.state.comp[c.id] = true;
             const lab = el("label", "kr-label", c.label
               + (c.price ? ` <small>· +${EUR(c.price)} · obligatorio</small>` : ` <small>· obligatorio</small>`)
               + (c.hint ? ` <small>· ${c.hint}</small>` : ""));
@@ -2903,18 +3508,22 @@ window.KR_applySkin = function (el, name) {
       const countTxt = count == null
         ? `<span class="kr-spin" style="width:14px;height:14px;border-width:2px;display:inline-block;vertical-align:-2px"></span> Calculando…`
         : `<b>${count}</b> ${count === 1 ? "hora disponible" : "horas disponibles"}`;
+      // v2.1.6 — Dia con oferta y sin hora: «desde» con el precio tachado.
       const priceNow = calc.tbd
         ? `<span class="kr-priceblock__tbd">A valorar</span>`
-        : `${calc.promo ? `<span class="kr-priceblock__was">${EUR(calc.subtotal)}</span>` : ""}<span class="kr-priceblock__now">${EUR(calc.total)}</span>`;
+        : calc.desde
+          ? `<span class="kr-priceblock__was">${EUR(calc.subtotal)}</span><span class="kr-priceblock__now"><small class="kr-desde">desde</small>${EUR(calc.desde.total)}</span>`
+          : `${calc.promo ? `<span class="kr-priceblock__was">${EUR(calc.subtotal)}</span>` : ""}<span class="kr-priceblock__now">${EUR(calc.total)}</span>`;
       c.innerHTML = `
         <div class="kr-hours-count">${countTxt}</div>
         <div class="kr-priceblock">
-          <div class="kr-priceblock__lab">${calc.tbd ? "Estimación" : "Precio"} · ${durTxt(calc.duration)}</div>
+          <div class="kr-priceblock__lab">${calc.tbd ? "Estimación" : "Precio"} · ${durTxt(calc.durationVista)}</div>
           <div class="kr-priceblock__row">${priceNow}</div>
         </div>`;
     }
     _renderHours(stateName, slots, calc) {
       const r = this.hoursRegion; r.innerHTML = "";
+      if (stateName !== "ok" && this.propRegion) this.propRegion.innerHTML = "";   // v2.1.2
       if (stateName === "loading") {
         const sk = el("div", "kr-skel");
         for (let i = 0; i < 9; i++) sk.appendChild(el("span"));
@@ -2942,12 +3551,16 @@ window.KR_applySkin = function (el, name) {
       }
       const grid = el("div", "kr-hours");
       slots.forEach(t => {
-        const b = el("button", "kr-hour" + (this.state.hour === t ? " is-sel" : ""), t);
+        // v2.1.2 — La hora puede llevar su oferta dentro; la seleccion va por
+        // data-hora y no por textContent.
+        const pctH = Number(this._ofertasDelDia()[t]) || 0;
+        const b = el("button", "kr-hour" + (this.state.hour === t ? " is-sel" : ""),
+          pctH > 0 ? `${t} <span class="kr-hour__oferta">−${pctH}%</span>` : t);
         b.type = "button";
+        b.dataset.hora = t;
         b.addEventListener("click", () => {
           this.state.hour = t;
-          r.querySelectorAll(".kr-hour").forEach(x => x.classList.toggle("is-sel", x.textContent === t));
-          this._renderActions(); this._renderSummary();
+          this._repaintHoras();
         });
         grid.appendChild(b);
       });
@@ -2967,6 +3580,30 @@ window.KR_applySkin = function (el, name) {
 
     /* ---- summary (espejo pasivo) + modo responsive + gating ---- */
     _proName(id) { const p = this._service.pros.find(p => p.id === id); return p ? p.name : "—"; }
+
+    // v2.2.0 — Servicio enlazado del servicio elegido (o null).
+    _enlazado() {
+      const e = this._service && this._service.enlazado;
+      return (e && typeof e === 'object' && e.setupUid) ? e : null;
+    }
+    // v2.2.0 — Con servicio enlazado y descuento solo en el principal, el
+    // porcentaje no es sobre el total: se dice sobre qué servicio es.
+    _sufijoDescuento(calc) {
+      if (!this._enlazado() || (calc && calc.savedEnl > 0)) return '';
+      return ` en ${this._service.name}`;
+    }
+    // v2.2.0 — Texto de la fila «A la vez»: servicio y, si se sabe, quién
+    // lo hace (el que devolvió la reserva o el único asignado).
+    _enlazadoTxt(staffNameReal) {
+      const e = this._enlazado();
+      if (!e) return '';
+      let quien = staffNameReal || '';
+      if (!quien && Array.isArray(e.idStaff) && e.idStaff.length === 1) {
+        const p = (this._service.pros || []).find(x => String(x.id) === String(e.idStaff[0]));
+        quien = p ? p.name : '';
+      }
+      return `${e.name}${quien ? ` <small>con ${quien}</small>` : ''}`;
+    }
 
     _applyServiceShape() {
       const cfg = this._service;
@@ -3017,13 +3654,22 @@ window.KR_applySkin = function (el, name) {
       if (cfg.requiresExtraPro && !this.state.sameExtra) {
         proRows += `<div class="kr-prow"><span class="kr-prow__k">Compl. con</span><span class="kr-prow__v">${this._proName(this.state.proExtra)}</span></div>`;
       }
+      // v2.2.0 — Servicio enlazado, a la vez.
+      if (this._enlazado()) {
+        proRows += `<div class="kr-prow"><span class="kr-prow__k">A la vez</span><span class="kr-prow__v">${this._enlazadoTxt('')}</span></div>`;
+      }
 
+      // v2.1.6 — Dia con oferta y sin hora: «desde» con el precio tachado.
       const totalNums = calc.tbd
         ? `<span class="kr-total__now kr-total__now--tbd">A valorar</span>`
-        : `${calc.promo ? `<span class="kr-total__was">${EUR(calc.subtotal)}</span>` : ""}<span class="kr-total__now">${EUR(calc.total)}</span>`;
+        : calc.desde
+          ? `<span class="kr-total__was">${EUR(calc.subtotal)}</span><span class="kr-total__now"><small class="kr-desde">desde</small>${EUR(calc.desde.total)}</span>`
+          : `${calc.promo ? `<span class="kr-total__was">${EUR(calc.subtotal)}</span>` : ""}<span class="kr-total__now">${EUR(calc.total)}</span>`;
       const totalLab = calc.tbd
         ? `<span class="kr-total__save">Se confirma en salón</span>`
-        : (calc.saved > 0.5 ? `<span class="kr-total__save">Ahorras ${EUR(calc.saved)}</span>` : "");
+        : calc.desde
+          ? ""   // el tachado y el «desde» ya lo dicen; con texto no cabe
+          : (calc.saved > 0.5 ? `<span class="kr-total__save">Ahorras ${EUR(calc.saved)}</span>` : "");
 
       // v2.0.10 — Panel destacado de descuento promocional al inicio del
       // resumen, antes del nombre del servicio y demás filas. Solo
@@ -3035,10 +3681,10 @@ window.KR_applySkin = function (el, name) {
       const promoBlock = (calc.promo && calc.saved > 0.005)
         ? `
         <div class="kr-summary__promo">
-          <div class="kr-summary__promo-title">🎉 ENHORABUENA, este servicio tiene un descuento promocional</div>
+          <div class="kr-summary__promo-title">${calc.esOferta ? "🎉 ENHORABUENA, tienes un descuento por reservar este día y hora" : "🎉 ENHORABUENA, este servicio tiene un descuento promocional"}</div>
           <div class="kr-summary__promo-rows">
             <div class="kr-prow"><span class="kr-prow__k">Precio original</span><span class="kr-prow__v">${EUR(calc.subtotal)}</span></div>
-            <div class="kr-prow"><span class="kr-prow__k">Descuento (−${calc.promo}%)</span><span class="kr-prow__v">−${EUR(calc.saved)}</span></div>
+            <div class="kr-prow"><span class="kr-prow__k">Descuento (−${calc.promo}%${this._sufijoDescuento(calc)})</span><span class="kr-prow__v">−${EUR(calc.saved)}</span></div>
             <div class="kr-prow"><span class="kr-prow__k">Precio final a pagar en salón</span><span class="kr-prow__v">${EUR(calc.total)}</span></div>
           </div>
         </div>`
@@ -3053,7 +3699,7 @@ window.KR_applySkin = function (el, name) {
           <div class="kr-prow"><span class="kr-prow__k">Hora</span>${hourTxt}</div>
           ${proRows}
           ${compRows}
-          <div class="kr-prow"><span class="kr-prow__k">Duración aprox.</span><span class="kr-prow__v">${durTxt(calc.duration)}</span></div>
+          <div class="kr-prow"><span class="kr-prow__k">Duración aprox.</span><span class="kr-prow__v">${durTxt(calc.durationVista)}</span></div>
         </div>
         <div class="kr-total">
           <div class="kr-total__lab"><b>Total</b>${totalLab}</div>
@@ -3340,45 +3986,7 @@ window.KR_applySkin = function (el, name) {
         //                choice; el motor recepcionProLogic v1.0.34 detecta
         //                el uid dentro de f.refs del item exclusivo y
         //                materializa el servicio en su posición.
-        const _obligQuitPayload = this._obligadosQuitables();
-        const complementosSetupUid = (cfg.complements || []).reduce((acc, c) => {
-          const v = this.state.comp[c.id];
-          if (c.type === 'bool') {
-            // v2.0.24 — quitable por regla inversa: va en el envío por defecto,
-            // salvo que el cliente lo haya quitado (state === false). Así el
-            // motor lo cobra por la vía normal si el cliente lo deja puesto.
-            if (_obligQuitPayload.has(c.id)) { if (v !== false) acc.push(c.id); }
-            else if (v) acc.push(c.id);
-          } else if (c.type === 'exclusive') {
-            if (v && v !== 'none') {
-              const o = (c.options || []).find(o => o.id === v);
-              if (o) {
-                acc.push({
-                  uid: o.id,                  // setupUid del servicio elegido
-                  varianteId: o.id,
-                  varianteLabel: o.label || '',
-                  price: (o.price == null ? null : Number(o.price)),
-                  duration: Number(o.duration) || 0
-                });
-              }
-            }
-          } else {
-            // choice
-            if (v && v !== 'none') {
-              const o = (c.options || []).find(o => o.id === v);
-              if (o) {
-                acc.push({
-                  uid: c.id,
-                  varianteId: o.id,
-                  varianteLabel: o.label || '',
-                  price: (o.price == null ? null : Number(o.price)),
-                  duration: Number(o.duration) || 0
-                });
-              }
-            }
-          }
-          return acc;
-        }, []);
+        const complementosSetupUid = this._buildComplementosPayload();
 
         // Guardar contact data para usarla al recibir la respuesta
         this._lastContactData = data;
@@ -3389,21 +3997,10 @@ window.KR_applySkin = function (el, name) {
         // v1.0.25 y la reserva se cree con el precio/duración de la
         // variante. Si variantIdx === -1 (base) o el servicio no tiene
         // variantes, varianteSel = null → motor usa base.
-        let varianteSel = null;
-        if (cfg.hasVariants && Array.isArray(cfg.variantes)) {
-          const idx = this.state.variantIdx;
-          if (Number.isInteger(idx) && idx >= 0 && idx < cfg.variantes.length) {
-            const v = cfg.variantes[idx];
-            if (v && typeof v === 'object') {
-              const vLabel = v.label || v.nombre || '';
-              const vPriceRaw = (v.precio != null ? v.precio : v.price);
-              const vDurRaw = (v.duracion != null ? v.duracion : v.duration);
-              const vPrice = (vPriceRaw != null) ? Number(vPriceRaw) : 0;
-              const vDur = (vDurRaw != null) ? Number(vDurRaw) : 0;
-              varianteSel = { idx, label: vLabel, price: vPrice, duration: vDur };
-            }
-          }
-        }
+        const varianteSel = this._buildVarianteSel();
+
+        // v2.1.2 — Oferta que la clienta esta viendo (0 si ninguna).
+        const calcEnvio = this._calc();
 
         const payload = {
           fecha: day.id,
@@ -3434,7 +4031,12 @@ window.KR_applySkin = function (el, name) {
           // libre en TODO el bloque continuo que el motor de huecos ya
           // validó. Sin esta línea el backend cae a la duración base del
           // principal (riesgo de solape en cascadas con complementos).
-          durationMin: this._calc().duration
+          // v2.1.0 — Sigue viajando, pero ya no decide: crearReservaPublica
+          // v0.12.0 vuelve a medir con esta misma composicion antes de crear.
+          durationMin: this._calc().duration,
+          // v2.1.2 — Porcentaje de oferta que se ve en pantalla. El backend
+          // lo revalida; la oferta que se graba la decide el servidor.
+          ofertaPct: calcEnvio.esOferta ? calcEnvio.promo : 0
         };
         this._emitirReservar(payload);
         return;
@@ -3461,7 +4063,9 @@ window.KR_applySkin = function (el, name) {
       // Recepción Pro V2 / marcarPagadoReserva (importeNeto). Si pintamos
       // conf.precioTotal al cliente, vería el bruto (16€) en lugar del
       // neto que realmente pagará (14,40€). Coherencia con el resumen.
-      const totalReal = (calc.promo && calc.saved > 0.005)
+      // v2.2.0 — Con servicio enlazado el backend devuelve el precio del
+      // principal; el total es el del resumen (las dos citas).
+      const totalReal = ((calc.promo && calc.saved > 0.005) || this._enlazado())
         ? calc.total
         : ((conf.precioTotal != null) ? conf.precioTotal : calc.total);
       const reservaId = conf.reservaId || null;
@@ -3485,10 +4089,10 @@ window.KR_applySkin = function (el, name) {
       const promoBlockConf = (calc.promo && calc.saved > 0.005)
         ? `
           <div class="kr-summary__promo" style="margin:18px 0 0">
-            <div class="kr-summary__promo-title">🎉 ENHORABUENA, este servicio tiene un descuento promocional</div>
+            <div class="kr-summary__promo-title">${calc.esOferta ? "🎉 ENHORABUENA, tienes un descuento por reservar este día y hora" : "🎉 ENHORABUENA, este servicio tiene un descuento promocional"}</div>
             <div class="kr-summary__promo-rows">
               <div class="kr-prow"><span class="kr-prow__k">Precio original</span><span class="kr-prow__v">${EUR(calc.subtotal)}</span></div>
-              <div class="kr-prow"><span class="kr-prow__k">Descuento (−${calc.promo}%)</span><span class="kr-prow__v">−${EUR(calc.saved)}</span></div>
+              <div class="kr-prow"><span class="kr-prow__k">Descuento (−${calc.promo}%${this._sufijoDescuento(calc)})</span><span class="kr-prow__v">−${EUR(calc.saved)}</span></div>
               <div class="kr-prow"><span class="kr-prow__k">Precio final a pagar en salón</span><span class="kr-prow__v">${EUR(calc.total)}</span></div>
             </div>
           </div>`
@@ -3511,7 +4115,8 @@ window.KR_applySkin = function (el, name) {
             ${localizador ? `<div class="kr-prow"><span class="kr-prow__k">Localizador</span><span class="kr-prow__v"><code>${localizador}</code></span></div>` : ''}
             <div class="kr-prow"><span class="kr-prow__k">Cuándo</span><span class="kr-prow__v">${whenTxt}</span></div>
             <div class="kr-prow"><span class="kr-prow__k">Profesional</span><span class="kr-prow__v">${this._proName(this.state.proMain)}${this.state.sameExtra ? "" : ` <small>+ ${this._proName(this.state.proExtra)}</small>`}</span></div>
-            <div class="kr-prow"><span class="kr-prow__k">Duración aprox.</span><span class="kr-prow__v">${durTxt(calc.duration)}</span></div>
+            ${this._enlazado() ? `<div class="kr-prow"><span class="kr-prow__k">A la vez</span><span class="kr-prow__v">${this._enlazadoTxt(conf.enlazada && conf.enlazada.staffName)}</span></div>` : ''}
+            <div class="kr-prow"><span class="kr-prow__k">Duración aprox.</span><span class="kr-prow__v">${durTxt(calc.durationVista)}</span></div>
             <div class="kr-prow"><span class="kr-prow__k">Pago</span><span class="kr-prow__v">${payTxt}</span></div>
           </div>
           ${consecBlock}

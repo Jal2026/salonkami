@@ -1,19 +1,62 @@
 // =====================================================
 // KAMISUITE — Backend: Área de Cliente
 // =====================================================
-// VERSION: 1.6.7
+// VERSION: 1.7.0
 //
-// v1.6.7 — BONOS: se devuelven también las CONDICIONES DE ADQUISICIÓN.
-//   El bloque de bonos entregaba código, servicio, sesiones y caducidad,
-//   pero el cliente no tenía forma de saber con qué condiciones compró:
-//   ni el plazo máximo para usar cada sesión ni la espera mínima entre
-//   ellas. Se añaden minIntervalDays, maxIntervalDays e issueDate (origen
-//   desde el que se cuentan los plazos).
-//   Se leen del SNAPSHOT congelado en el propio bono al emitirlo, nunca
-//   del catálogo: el servicio puede haberse reconfigurado después.
-//   0/vacío = esa condición no aplica. Los bonos emitidos antes de
-//   voucherPublicLogic v1.4.0 no tienen plazo máximo y devuelven 0.
-//   Aditivo: no cambia PRIME, tarjetas, reservas, perfil ni notas.
+// v1.7.0 — 🔗 CITA ENLAZADA (23-oct-2026). Un servicio con servicio
+//   enlazado crea dos citas a la misma hora, cada una con su profesional y
+//   su cobro (recepcionProLogic v1.0.62, campo grupoEnlazado). Para la
+//   clienta es UNA cita:
+//     (A) getAreaCliente: las dos citas del grupo salen como una en
+//         «Próximas citas»: servicios unidos con « + », profesionales con
+//         « y », hora de fin la del que acaba más tarde, precio la suma.
+//         El id es el de la cita que se creó primero (la principal).
+//     (B) cancelarCitaCliente no cambia: cancelarReserva v1.0.62 ya
+//         cancela las dos.
+//     (C) getHuecosCambioReserva: una hora solo vale si también lo es para
+//         el profesional de la otra cita, con su duración (se mueven
+//         juntas). Mismo motor, una llamada por cita.
+//     (D) moverCitaCliente: revalida las dos antes de mover;
+//         reprogramarReserva v1.0.62 mueve las dos, y la oferta de smart
+//         pricing se recalcula en cada una con su propio precio.
+//   Sin cita enlazada, todo es idéntico a v1.6.9. Requiere
+//   recepcionProLogic v1.0.62.
+//
+// v1.6.9 — SMART PRICING: llamadas a smartPricingLogic con await
+//   (22-oct-2026). En Hair-Times las funciones normales de smartPricingLogic
+//   llegaban a otros archivos como promesa sin esperar (diagnóstico de
+//   widgetPublicoLogic 0.13.1). Aquí `campos` y el porcentaje de cada hora
+//   eran promesas: al mover una cita con oferta, el Área de Cliente no veía
+//   su oferta ni la del hueco nuevo.
+//     · camposOfertaReserva → await (async en smartPricingLogic v1.0.6).
+//     · El porcentaje de las horas → una llamada `await
+//       sp.pctOfertasEnHoras({ fecha, horas, fresco:true })`.
+//     · Requiere smartPricingLogic v1.0.6. Nada más cambia.
+//
+// v1.6.8 — SMART PRICING: la oferta de la cita al moverla (21-oct-2026).
+//   NUMERACIÓN: construido sobre la 1.6.6, que es la que hay en el repo de
+//   Hair-Times. La 1.6.7 (condiciones del bono, 21-ago-2026) se entregó y
+//   se subió a mano en Salón Kami y NO está en Hair-Times; este archivo no
+//   la contiene. Se salta el número para no reutilizarlo.
+//
+//   Regla decidida por Jal: si la clienta mueve una cita CON oferta a un
+//   hueco sin oferta, la pierde y se le avisa antes de confirmar; si el
+//   nuevo hueco también tiene oferta, la cita se queda con la del nuevo
+//   hueco. Si la mueve el salón desde Recepción, la oferta se mantiene
+//   (por eso esta lógica vive aquí y NO en reprogramarReserva, que es
+//   compartida con Recepción PRO).
+//   Las citas SIN oferta no cambian en nada al moverlas.
+//
+//   (A) getHuecosCambioReserva devuelve, cuando la cita lleva oferta,
+//       `ofertaActualPct` y `ofertas` { 'HH:MM': pct } del día pedido, para
+//       que el widget avise antes de confirmar. Versión vigente en fresco.
+//   (B) moverCitaCliente, tras mover la cita con reprogramarReserva,
+//       recalcula su oferta para el nuevo hueco y la reescribe (o la borra)
+//       con READ-MERGE-UPDATE. El ahorro nuevo se calcula sobre el mismo
+//       precio base que el original (ahorro × 100 / porcentaje), sin
+//       consultar el catálogo. No-blocking: si falla, la cita ya está
+//       movida y conserva la oferta anterior; queda ⚠️ en el log.
+//   smartPricingLogic se importa de forma dinámica dentro de try/catch.
 //
 // v1.6.6 — Fecha de verificación del appId de Wix Stores.
 //   - Documentada en el comentario de APP_ID_WIX_STORES la fecha
@@ -157,8 +200,7 @@
 //         · Imagen de tarjeta desde `KamisuiteProductsConfig.primeImage`
 //           via `getProductosConfig` de productosKamisuiteLogic v1.0.1+.
 //     + data.bonos    = { tiene, items:[{id,code,serviceLabel,
-//                         remainingUses,totalUses,expirationDate,
-//                         issueDate,minIntervalDays,maxIntervalDays}],
+//                         remainingUses,totalUses,expirationDate}],
 //                         urlAdquirir }
 //         · Se lee de `KamisuiteVouchers` (contactId, status='ACTIVO')
 //           via `getProductosCustomCliente`.
@@ -427,7 +469,7 @@ import { cancelarReserva, reprogramarReserva } from 'backend/recepcionProLogic.w
 import { getHuecosDisponibles } from 'backend/widgetPublicoLogic.web';
 import wixData from 'wix-data';
 
-const VERSION = '1.6.7';
+const VERSION = '1.7.0';
 const TAG = `[ClienteArea][${VERSION}]`;
 
 // App ID constante de Wix Stores. Requerido en catalogReference.appId
@@ -439,6 +481,9 @@ const WIX_STORES_APP_ID = '215238eb-22a5-4c36-9e7b-e7c08025e04e';
 const CMS_RESERVAS     = 'KamisuiteReservations';
 const CMS_PAGOS        = 'PaymentReservations';
 const CMS_SALON_CONFIG = 'SalonConfig';
+
+// v1.7.0 — CITA ENLAZADA: marca común de las dos citas (KamisuiteReservations).
+const F_RES_GRUPO = 'grupoEnlazado';
 
 // Claves de campos personalizados Wix Contacts — KALONICE
 // (verificadas en el diálogo "Editar campo personalizado" / Lector CMS)
@@ -1018,8 +1063,7 @@ function validarMemberContactId(memberContactId) {
 //     bonos: {                              // v1.6.0
 //       tiene: boolean,
 //       items: [{ id, code, serviceLabel, remainingUses, totalUses,
-//                 expirationDate:'YYYY-MM-DD', issueDate:'YYYY-MM-DD',
-//                 minIntervalDays, maxIntervalDays }],
+//                 expirationDate:'YYYY-MM-DD' }],
 //       urlAdquirir: 'https://…'
 //     },
 //     tarjetas: {                           // v1.6.0
@@ -1160,9 +1204,14 @@ export const getAreaCliente = webMethod(
             precioTotal: it.precioTotal || 0,
             status: it.status || 'CONFIRMADA',
             fechaReserva: fechaIni.toISOString(),
-            duracionTotal: it.duracionTotal || 0
+            duracionTotal: it.duracionTotal || 0,
+            // v1.7.0 — solo para fusionar la cita enlazada (se quitan abajo)
+            _grupo: String(it[F_RES_GRUPO] || ''),
+            _creado: it._createdDate ? new Date(it._createdDate).getTime() : 0
           };
         });
+        // v1.7.0 — CITA ENLAZADA: las dos citas del grupo, como una.
+        proximas = fusionarCitasEnlazadas(proximas);
       } catch (e) {
         console.warn(`${TAG} ⚠️ proximas: ${e.message}`);
       }
@@ -1515,27 +1564,13 @@ export const getAreaCliente = webMethod(
           if (v.expirationDate && new Date(v.expirationDate).getTime() < nowMs) return false;
           return true;
         });
-        // v1.6.7 — CONDICIONES DE ADQUISICIÓN.
-        // Hasta ahora el Área de Cliente enseñaba el código, el servicio, las
-        // sesiones y la caducidad — pero NO las condiciones con las que se
-        // compró el bono. Se añaden los dos plazos, leídos del snapshot
-        // congelado en el propio bono al emitirlo (nunca del catálogo: el
-        // servicio puede haberse reconfigurado después de la compra).
-        // 0/vacío = esa condición no aplica a ese bono.
         bonos.items = activos.map(v => ({
           id: v._id || '',
           code: v.code || '',
           serviceLabel: v.serviceLabel || '',
           remainingUses: Number(v.remainingUses) || 0,
           totalUses: Number(v.totalUses) || 0,
-          expirationDate: v.expirationDate ? ymdMadrid(v.expirationDate) : '',
-          // Días mínimos a dejar entre una sesión y la siguiente.
-          minIntervalDays: Number(v.bonusUseIntervalDays) || 0,
-          // Plazo máximo para usar cada sesión, contado desde la compra.
-          maxIntervalDays: Number(v.bonusMaxIntervalDays) || 0,
-          // Fecha de compra: es el origen desde el que se cuentan los plazos,
-          // así que sin ella el cliente no puede situarlos en el calendario.
-          issueDate: v.issueDate ? ymdMadrid(v.issueDate) : ''
+          expirationDate: v.expirationDate ? ymdMadrid(v.expirationDate) : ''
         }));
         bonos.tiene = bonos.items.length > 0;
         console.log(
@@ -1849,6 +1884,136 @@ export const cancelarCitaCliente = webMethod(
  * SALIDA:   { ok, huecos: ['10:00', ...], fecha, reservaId,
  *             motivo: 'cerrado' | undefined, error? }
  */
+// v1.6.8 — SMART PRICING. Oferta actual de la cita y ofertas de las horas
+// libres del día pedido. Solo si la cita lleva oferta; si no, vacío.
+async function ofertaParaCambio(reg, fecha, huecos) {
+  const nada = { ofertaActualPct: 0, ofertas: {} };
+  try {
+    const sp = await import('backend/smartPricingLogic.web');
+    const campos = await sp.camposOfertaReserva();   // v1.6.9 — await
+    const pctActual = Number(reg?.[campos.pct]) || 0;
+    if (!(pctActual > 0)) return nada;
+    // v1.6.9 — Una llamada async con await para todas las horas.
+    const r = await sp.pctOfertasEnHoras({ fecha, horas: Array.isArray(huecos) ? huecos : [], fresco: true });
+    const ofertas = (r && r.activo && r.ofertas) ? r.ofertas : {};
+    return { ofertaActualPct: pctActual, ofertas };
+  } catch (e) {
+    console.warn(`${TAG} ⚠️ ofertaParaCambio (no-blocking): ${e.message}`);
+    return nada;
+  }
+}
+
+// v1.6.8 — SMART PRICING. Tras mover una cita CON oferta: se queda con la
+// oferta del nuevo hueco o la pierde. READ-MERGE-UPDATE (wixData.update
+// reemplaza el documento entero). El precio base se recupera de la propia
+// oferta (ahorro × 100 / porcentaje), así que no hace falta el catálogo.
+async function recalcularOfertaTrasMover(reservaId, regAntes, nuevaFecha, nuevaHora) {
+  try {
+    const sp = await import('backend/smartPricingLogic.web');
+    const campos = await sp.camposOfertaReserva();   // v1.6.9 — await
+    const pctAntes = Number(regAntes?.[campos.pct]) || 0;
+    const ahorroAntes = Number(regAntes?.[campos.ahorro]) || 0;
+    if (!(pctAntes > 0) || !(ahorroAntes > 0)) return;   // cita sin oferta: nada que hacer
+
+    // v1.6.9 — Una llamada async con await (antes pctOfertaEnHueco síncrona).
+    const vig = await sp.pctOfertasEnHoras({ fecha: nuevaFecha, horas: [nuevaHora], fresco: true });
+    const pctNuevo = vig.activo ? (Number((vig.ofertas || {})[nuevaHora]) || 0) : 0;
+    const base = Math.round((ahorroAntes * 100 / pctAntes) * 100) / 100;
+
+    const actual = await wixData.get(CMS_RESERVAS, reservaId, { suppressAuth: true });
+    if (!actual) return;
+    const fusion = { ...actual };
+    if (pctNuevo > 0) {
+      fusion[campos.pct] = pctNuevo;
+      fusion[campos.ahorro] = Math.min(
+        Math.round(base * pctNuevo) / 100,
+        Number(actual.precioTotal) || Infinity
+      );
+      fusion[campos.versionId] = vig.versionId || '';
+    } else {
+      fusion[campos.pct] = null;
+      fusion[campos.ahorro] = null;
+      fusion[campos.versionId] = '';
+    }
+    await wixData.update(CMS_RESERVAS, fusion, { suppressAuth: true });
+    console.log(`${TAG} 🏷️ Oferta tras mover ${reservaId}: −${pctAntes}% → ${pctNuevo > 0 ? '−' + pctNuevo + '%' : 'sin oferta'}`);
+  } catch (e) {
+    console.warn(`${TAG} ⚠️ No se pudo recalcular la oferta de ${reservaId} tras moverla (conserva la anterior): ${e.message}`);
+  }
+}
+
+// v1.7.0 — CITA ENLAZADA. Une en una sola entrada las citas de un mismo
+// grupo. Se queda con la creada primero (la principal) y le suma la otra.
+// Las citas sin grupo pasan tal cual. Quita los campos internos.
+function fusionarCitasEnlazadas(lista) {
+  const out = [];
+  const porGrupo = new Map();
+  for (const c of (Array.isArray(lista) ? lista : [])) {
+    if (!c._grupo) { out.push(c); continue; }
+    if (!porGrupo.has(c._grupo)) { porGrupo.set(c._grupo, []); out.push(c._grupo); }
+    porGrupo.get(c._grupo).push(c);
+  }
+  const res = out.map(x => {
+    if (typeof x !== 'string') return x;
+    const grupo = porGrupo.get(x).slice().sort((a, b) => a._creado - b._creado);
+    const base = { ...grupo[0] };
+    if (grupo.length > 1) {
+      base.servicio = grupo.map(c => c.servicio).filter(Boolean).join(' + ');
+      base.profesional = grupo.map(c => c.profesional).filter(Boolean).join(' y ');
+      base.horaFin = grupo.map(c => c.horaFin).filter(Boolean).sort().pop() || base.horaFin;
+      base.precioTotal = Math.round(grupo.reduce((acc, c) => acc + (Number(c.precioTotal) || 0), 0) * 100) / 100;
+      base.duracionTotal = Math.max(...grupo.map(c => Number(c.duracionTotal) || 0));
+      base.enlazada = true;
+    }
+    return base;
+  });
+  for (const c of res) { delete c._grupo; delete c._creado; }
+  return res;
+}
+
+// v1.7.0 — CITA ENLAZADA. Las otras citas del grupo de `reg` que se mueven
+// con ella (ni cobradas ni canceladas: reprogramarReserva no las toca).
+async function hermanasQueSeMueven(reg) {
+  const grupo = String(reg?.[F_RES_GRUPO] || '').trim();
+  if (!grupo) return [];
+  const r = await wixData.query(CMS_RESERVAS)
+    .eq(F_RES_GRUPO, grupo)
+    .limit(10)
+    .find({ suppressAuth: true });
+  return (r.items || []).filter(it =>
+    it && it._id !== reg._id && it.status !== 'CANCELADA' && it.status !== 'PAGADO'
+  );
+}
+
+// v1.7.0 — CITA ENLAZADA. De `huecos`, las horas que también valen para
+// cada una de las otras citas del grupo, con su profesional y su duración.
+// Si alguna no tiene datos para comprobarlo, no queda ninguna hora: mejor
+// no ofrecer que mover a medias.
+async function filtrarHuecosConHermanas(hermanas, fecha, huecos) {
+  let lista = Array.isArray(huecos) ? huecos.slice() : [];
+  for (const h of hermanas) {
+    const durH = (Number(h.duracionTotal) || 0) + (Number(h.extensionMin) || 0);
+    const staffH = h.staffId || '';
+    if (!staffH || durH <= 0) {
+      console.warn(`${TAG} ⚠️ Cita enlazada ${h._id} sin profesional o duración → sin horas para mover`);
+      return [];
+    }
+    const rH = await getHuecosDisponibles({
+      fecha,
+      proId: staffH,
+      durationMin: durH,
+      idStaffPermitidos: [staffH]
+    });
+    if (!rH?.ok) {
+      console.warn(`${TAG} ⚠️ Cita enlazada ${h._id}: el motor no respondió → sin horas para mover`);
+      return [];
+    }
+    const libres = new Set(rH.huecos || []);
+    lista = lista.filter(x => libres.has(x));
+  }
+  return lista;
+}
+
 export const getHuecosCambioReserva = webMethod(
   Permissions.SiteMember,
   async ({ memberContactId, reservaId, fecha } = {}) => {
@@ -1907,6 +2072,16 @@ export const getHuecosCambioReserva = webMethod(
         idStaffPermitidos: [staffId]
       });
 
+      // v1.7.0 — CITA ENLAZADA: la hora tiene que valer también para la
+      // otra cita, que se mueve a la vez.
+      const hermanasCambio = await hermanasQueSeMueven(reg);
+      if (hermanasCambio.length && res) {
+        res.huecos = await filtrarHuecosConHermanas(hermanasCambio, fecha, res.huecos || []);
+      }
+
+      // v1.6.8 — SMART PRICING. Solo para citas que ya llevan oferta.
+      const sp = await ofertaParaCambio(reg, fecha, res?.huecos || []);
+
       const elapsed = ((Date.now() - t0) / 1000).toFixed(2);
       console.log(
         `${TAG} ✅ getHuecosCambioReserva ${reservaId} fecha=${fecha} ` +
@@ -1922,7 +2097,9 @@ export const getHuecosCambioReserva = webMethod(
         motivo: res?.motivo,
         abreA: res?.abreA,
         cierraA: res?.cierraA,
-        error: res?.error
+        error: res?.error,
+        ofertaActualPct: sp.ofertaActualPct,
+        ofertas: sp.ofertas
       };
 
     } catch (e) {
@@ -2002,7 +2179,11 @@ export const moverCitaCliente = webMethod(
       if (!resHuecos?.ok) {
         return { ok: false, version: VERSION, error: { message: 'Error revalidando disponibilidad' } };
       }
-      const huecos = resHuecos.huecos || [];
+      // v1.7.0 — CITA ENLAZADA: también para la otra cita.
+      const hermanasMover = await hermanasQueSeMueven(reg);
+      const huecos = hermanasMover.length
+        ? await filtrarHuecosConHermanas(hermanasMover, nuevaFecha, resHuecos.huecos || [])
+        : (resHuecos.huecos || []);
       if (!huecos.includes(nuevaHora)) {
         console.warn(
           `${TAG} ⚠️ moverCitaCliente ${reservaId}: slot ${nuevaFecha} ${nuevaHora} ya no disponible ` +
@@ -2027,6 +2208,14 @@ export const moverCitaCliente = webMethod(
           version: VERSION,
           error: { message: result?.error?.message || result?.error || 'No se pudo mover la cita' }
         };
+      }
+
+      // v1.6.8 — SMART PRICING. La oferta sigue al hueco, no a la cita.
+      await recalcularOfertaTrasMover(reservaId, reg, nuevaFecha, nuevaHora);
+      // v1.7.0 — CITA ENLAZADA: reprogramarReserva ya movió la otra; su
+      // oferta se recalcula igual, con su propio precio.
+      for (const h of hermanasMover) {
+        await recalcularOfertaTrasMover(h._id, h, nuevaFecha, nuevaHora);
       }
 
       const elapsed = ((Date.now() - t0) / 1000).toFixed(2);

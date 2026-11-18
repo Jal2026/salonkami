@@ -1,6 +1,85 @@
 /* =====================================================================
  * KAMISUITE — Widget Nueva Recepción PRO (CMS-first)
  * Custom Element: <recepcion-pro-cms>
+ * VERSION: 1.1.117  ·  CIF/NIF y razón social del cliente
+ *
+ *   Pareja: page code v1.0.49 + recepcionLogic v2.2.0 +
+ *   facturacionSalonLogic v1.0.9. Los dos datos van a campos
+ *   personalizados del contacto (custom.cif / custom.razon-social).
+ *
+ *   (A) CLIENTE NUEVO y EDITAR CLIENTE. Fila nueva bajo el email:
+ *       «CIF / NIF (opcional)» y «Razón social (opcional)», con las
+ *       clases ks-field-row / ks-field de Nombre y Apellido. Sin CSS nuevo.
+ *       · Nuevo: viajan en 'crearCliente' como `cif` y `razonSocial`.
+ *       · Editar: los campos abren desactivados («Cargando…») y se piden
+ *         con 'leerDatosFiscales' (origen 'editar'). Se activan con el
+ *         valor guardado. Si no se pueden leer, siguen desactivados y no
+ *         se envían: nunca se borra un CIF por no haberlo podido leer.
+ *         Solo se envían si cambian.
+ *   (B) FACTURA DE LA CITA. Al pulsar «📄 Factura» o «Convertir a
+ *       factura», el formulario se rellena con el CIF y la razón social de
+ *       la ficha (origen 'factura'), si el operador no ha empezado a
+ *       escribir. Antes salía siempre vacío y había que volver a teclearlo.
+ *   (C) TIENDA. Con el cliente ya cargado, el paso de cliente se rellena
+ *       igual (origen 'tienda'). Al dar de alta un cliente desde TIENDA, el
+ *       CIF y la razón social viajan ya en 'crearCliente'.
+ *   (D) MENSAJES. Al crear o editar un cliente ya no se muestra el texto
+ *       de Wix (en inglés): `_mensajeErrorContacto` traduce el `code` del
+ *       backend (email o teléfono de otro cliente, o error genérico). Si
+ *       la creación o la edición fallan, el botón vuelve a estar disponible.
+ *       Si el cliente se guarda pero el CIF no, un aviso lo dice.
+ *   Nada más cambia.
+ *
+ * VERSION: 1.1.116  ·  Cita enlazada: marca en la agenda y en la cita
+ *
+ *   Pareja backend: recepcionProLogic v1.0.62. Un servicio con servicio
+ *   enlazado crea dos citas a la misma hora, cada una en la columna de su
+ *   profesional y con su cobro. getReservasPorFecha manda `grupoEnlazado`.
+ *   La pareja se busca en las citas del día ya cargadas (empiezan a la vez,
+ *   así que siempre son del mismo día). Ninguna lógica de cobro cambia.
+ *
+ *   (A) AGENDA. Cada bloque de una cita enlazada lleva 🔗 junto a la hora,
+ *       y el primero, si cabe, la etiqueta «🔗 <profesional de la otra>»
+ *       con el mismo estilo que «⛓ cascada». El tooltip dice con qué va.
+ *   (B) MODAL DE LA CITA. Bajo la hora, recuadro «🔗 A la vez: <servicio>
+ *       · <profesional> · hora · estado». Tocarlo abre la otra cita.
+ *   (C) CANCELAR. El aviso dice que se cancelan las dos (o que la otra ya
+ *       está cobrada y no se toca). El backend cancela las dos.
+ *   (D) Avisos al crear, cancelar, cambiar fecha o mover una fase dicen
+ *       cuándo la otra cita también ha cambiado.
+ *   Una clase CSS nueva (.ks-appt-link, tamaño del icono). Nada más de
+ *   estética cambia.
+ *
+ * VERSION: 1.1.115  ·  Smart pricing: la oferta se cobra con precio cerrado
+ *
+ *   Diseño aprobado por Jal el 21-oct-2026 (smart pricing, fase 1).
+ *   Pareja backend: recepcionProLogic v1.0.61, que resuelve en la carga de
+ *   citas el DESCUENTO AUTOMÁTICO de cada una (el mayor entre la oferta
+ *   grabada al reservar y la promo de catálogo, nunca la suma) y lo manda
+ *   en los mismos campos que ya pintaba este widget, más
+ *   `descuentoAutoTipo` ('oferta' | 'promo').
+ *
+ *   (A) MISMA FRANJA ARCO IRIS. La cita con oferta usa la franja y el borde
+ *       dorado de la promo, con el mismo texto. No se toca su estética.
+ *   (B) PRECIO CERRADO. Si la cita tiene descuento automático (oferta o
+ *       promo), «＋ Aplicar descuento» se ve en fantasma, desactivado, y no
+ *       se puede sumar una rebaja manual. Decisión de Jal: incluye la promo
+ *       de catálogo, que hasta ahora sí dejaba rebajar encima.
+ *   (C) BONOS Y TARJETAS. Con un canje activo, el descuento automático deja
+ *       de aplicarse y desaparece la franja: nada se acumula. Antes, una
+ *       cita con promo y bono sobre el mismo servicio restaba las dos cosas
+ *       y podía cobrar de menos los complementos.
+ *   (D) TOKEN DEL COBRO. Cuando gana la oferta, la descripción del cobro
+ *       lleva «🌈 Oferta -X.XX€» en lugar de «🌈 Promo -X.XX€». Empieza por
+ *       🌈 para que la factura lo descarte igual, no contiene la palabra
+ *       «descuento» para que el cierre no lo cuente como rebaja manual, e
+ *       importe con punto porque la descripción se separa por comas.
+ *   (E) FIX PAGO MIXTO. El total del pago mixto se calculaba solo con el %
+ *       manual sobre el precio bruto: ignoraba la promo, el descuento en
+ *       euros y el canje, y no cuadraba con el importe que luego se cobra.
+ *       Ahora usa exactamente la misma cuenta que el TOTAL del modal y que
+ *       el cobro.
+ *
  * VERSION: 1.1.114  ·  FIX el buscador de productos perdía el foco
  *
  *   Al teclear, el panel se repinta entero con body.innerHTML, lo que
@@ -2066,7 +2145,7 @@
 (function () {
   'use strict';
 
-  const TAG = '[RecepcionProCMS-Widget v1.1.114]';
+  const TAG = '[RecepcionProCMS-Widget v1.1.117]';
 
   // ─── helpers ───
   function esc(s) {
@@ -2628,6 +2707,7 @@ button { font-family: inherit; cursor: pointer; }
 .ks-appt-inner { position: relative; z-index: 2; display: flex; flex-direction: column; gap: 1px; padding: 4px 8px; color: #fff; height: 100%; }
 .ks-appt-topline { display: flex; align-items: baseline; gap: 5px; min-width: 0; padding-right: 18px; }
 /* v1.1.55 — bajada de tosquedad: hora 700→500, cliente 700→600. */
+.ks-appt-link { font-size: 9.5px; line-height: 1; flex: none; }   /* v1.1.116 — cita enlazada */
 .ks-appt-time { font-size: 9.5px; font-weight: 500; opacity: .82; font-variant-numeric: tabular-nums; flex: none; }
 .ks-appt-client { font-size: 11px; font-weight: 600; line-height: 1.15; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .ks-appt-svc { font-size: 10px; font-weight: 500; opacity: .92; line-height: 1.2; display: flex; flex-wrap: wrap; align-items: center; gap: 5px; }
@@ -3652,7 +3732,9 @@ button { font-family: inherit; cursor: pointer; }
               }
               break;
             }
-            this._toast(`Reserva creada · ${p.precioTotal}€`);
+            this._toast(p.enlazada
+              ? `Reserva creada · ${p.precioTotal}€ · 🔗 ${p.enlazada.label} con ${p.enlazada.staffName} a la vez`
+              : `Reserva creada · ${p.precioTotal}€`);   // v1.1.116
             this._desarmar();
             this._sendToPage('getReservas', { fecha: this._fecha });
           } else this._toast('Error: ' + (p.error?.message || 'no se pudo crear'));
@@ -3761,7 +3843,7 @@ button { font-family: inherit; cursor: pointer; }
           }
           break;
         case 'reservaCancelada':
-          if (p.ok) { this._toast('Cita cancelada'); this._closeModal(); this._sendToPage('getReservas', { fecha: this._fecha }); }
+          if (p.ok) { this._toast(p.enlazadasCanceladas > 0 ? 'Cita cancelada · también la enlazada 🔗' : 'Cita cancelada'); this._closeModal(); this._sendToPage('getReservas', { fecha: this._fecha }); }
           else this._toast('Error al cancelar');
           break;
         // v1.1.40 — bloqueos persistentes
@@ -3799,7 +3881,7 @@ button { font-family: inherit; cursor: pointer; }
           break;
         // v1.1.16 — respuestas "antes de cobrar"
         case 'reserva-reprogramada':
-          if (p.ok) { this._toast('Cita reprogramada'); this._closeSubModal(); this._closeModal(); this._sendToPage('getReservas', { fecha: this._fecha }); }
+          if (p.ok) { this._toast(p.enlazadasMovidas > 0 ? 'Cita reprogramada · la enlazada 🔗 también' : 'Cita reprogramada'); this._closeSubModal(); this._closeModal(); this._sendToPage('getReservas', { fecha: this._fecha }); }
           else this._toast('Error: ' + (p.error || 'no se pudo reprogramar'));
           break;
         case 'fase-movida':
@@ -3814,7 +3896,7 @@ button { font-family: inherit; cursor: pointer; }
             break;
           }
           // v1.1.29 — drag&drop por fase
-          if (p.ok) { this._toast('Fase movida ✓'); this._sendToPage('getReservas', { fecha: this._fecha }); }
+          if (p.ok) { this._toast(p.enlazadasMovidas > 0 ? 'Fase movida ✓ · la cita enlazada 🔗 se ha movido igual' : 'Fase movida ✓'); this._sendToPage('getReservas', { fecha: this._fecha }); }
           else this._toast('Error: ' + (p.error || 'no se pudo mover la fase'));
           break;
         case 'fase-extendida':
@@ -4003,14 +4085,20 @@ button { font-family: inherit; cursor: pointer; }
           if (r.ok && r.cliente) {
             this._closeBlankForm();
             this._seleccionarCliente(r.cliente);
-            this._toast('Cliente creado');
+            // v1.1.117 — aviso si el cliente se creó pero el CIF no se guardó.
+            this._toast(r.datosFiscales && r.datosFiscales.ok === false
+              ? 'Cliente creado, pero no se han podido guardar el CIF/NIF y la razón social. Puedes añadirlos al emitir la factura.'
+              : 'Cliente creado');
             // v1.1.84 — si el alta venía del botón TIENDA, encadenar la venta.
             if (this._tiendaEsperandoCliente) {
               this._tiendaEsperandoCliente = false;
               this._abrirVentaTienda();
             }
           } else {
-            this._toast('Error: ' + (r.error?.message || 'no se pudo crear'));
+            // v1.1.117 — mensaje propio, nunca el texto de Wix.
+            this._toast(this._mensajeErrorContacto(r.error));
+            const bCr = this.shadowRoot.getElementById('bsave');
+            if (bCr) { bCr.textContent = 'Crear'; bCr.disabled = false; }
             if (this._tiendaEsperandoCliente) {
               this._tiendaEsperandoCliente = false;
               const bTd = this.shadowRoot.getElementById('tdOk');
@@ -4032,12 +4120,21 @@ button { font-family: inherit; cursor: pointer; }
             };
             this._closeBlankForm();
             this._renderClienteSelected();
-            this._toast('Cliente actualizado ✓');
+            // v1.1.117 — aviso si el cliente se guardó pero el CIF no.
+            this._toast(data.datosFiscales && data.datosFiscales.ok === false
+              ? 'Cliente actualizado, pero no se han podido guardar el CIF/NIF y la razón social.'
+              : 'Cliente actualizado ✓');
           } else {
-            this._toast('Error al editar: ' + (data.error?.message || 'desconocido'));
+            // v1.1.117 — mensaje propio, nunca el texto de Wix, y el botón
+            // vuelve a estar disponible para corregir y reintentar.
+            this._toast(this._mensajeErrorContacto(data.error));
+            const bEd = this.shadowRoot.getElementById('bsave');
+            if (bEd) { bEd.textContent = 'Guardar'; bEd.disabled = false; }
           }
           break;
         }
+        // v1.1.117 — CIF/NIF y razón social del contacto.
+        case 'datosFiscales': this._onDatosFiscales(p); break;
         case 'error': this._toast(p.message || 'Error'); break;
         case 'caja-data':
           this._cajaData = p.data || {};
@@ -4808,6 +4905,7 @@ button { font-family: inherit; cursor: pointer; }
         <div class="ks-field-row"><label class="ks-field"><span>Nombre</span><input id="cfNombre" autofocus></label><label class="ks-field"><span>Apellido</span><input id="cfApellido"></label></div>
         <label class="ks-field"><span>Teléfono</span><div style="display:flex;gap:8px;align-items:stretch;">${this._renderSelectorPrefijo('+34', 'cfTelPre')}<input id="cfTel" style="flex:1;" placeholder="Número sin prefijo"></div></label>
         <label class="ks-field"><span>Email (opcional)</span><input id="cfEmail"></label>
+        <div class="ks-field-row"><label class="ks-field"><span>CIF / NIF (opcional)</span><input id="cfCif"></label><label class="ks-field"><span>Razón social (opcional)</span><input id="cfRazon"></label></div>
         <div class="ks-blank-foot"><button class="ks-detail-cancel" id="bcancel">Cancelar</button><button class="ks-detail-add" id="bsave">Crear</button></div>`;
       scrim.appendChild(form); root.appendChild(scrim);
       form.querySelector('#bx').addEventListener('click', () => this._closeBlankForm());
@@ -4818,7 +4916,12 @@ button { font-family: inherit; cursor: pointer; }
         const prefijo = form.querySelector('#cfTelPre').value;
         const numero = form.querySelector('#cfTel').value.trim();
         const telefono = numero ? `${prefijo} ${numero}` : '';
-        this._sendToPage('crearCliente', { nombre, apellido: form.querySelector('#cfApellido').value.trim(), telefono, email: form.querySelector('#cfEmail').value.trim() });
+        this._sendToPage('crearCliente', {
+          nombre, apellido: form.querySelector('#cfApellido').value.trim(), telefono, email: form.querySelector('#cfEmail').value.trim(),
+          // v1.1.117 — datos fiscales (opcionales)
+          cif: form.querySelector('#cfCif').value.trim(),
+          razonSocial: form.querySelector('#cfRazon').value.trim()
+        });
         const b = form.querySelector('#bsave'); b.textContent = 'Creando…'; b.disabled = true;
       });
     }
@@ -4844,8 +4947,13 @@ button { font-family: inherit; cursor: pointer; }
         <div class="ks-field-row"><label class="ks-field"><span>Nombre</span><input id="cfNombre" autofocus value="${esc(firstName)}"></label><label class="ks-field"><span>Apellido</span><input id="cfApellido" value="${esc(lastName)}"></label></div>
         <label class="ks-field"><span>Teléfono</span><div style="display:flex;gap:8px;align-items:stretch;">${this._renderSelectorPrefijo(prefijo, 'cfTelPre')}<input id="cfTel" style="flex:1;" placeholder="Número sin prefijo" value="${esc(numero)}"></div></label>
         <label class="ks-field"><span>Email (opcional)</span><input id="cfEmail" value="${esc(c.email || '')}"></label>
+        <div class="ks-field-row"><label class="ks-field"><span>CIF / NIF (opcional)</span><input id="cfCif" disabled placeholder="Cargando…"></label><label class="ks-field"><span>Razón social (opcional)</span><input id="cfRazon" disabled placeholder="Cargando…"></label></div>
         <div class="ks-blank-foot"><button class="ks-detail-cancel" id="bcancel">Cancelar</button><button class="ks-detail-add" id="bsave">Guardar</button></div>`;
       scrim.appendChild(form); root.appendChild(scrim);
+      // v1.1.117 — pedir CIF y razón social guardados. Los campos se
+      // activan al llegar 'datosFiscales' (ver _onDatosFiscales).
+      this._editFiscal = { contactId: c.contactId, cargado: false, cif: '', razonSocial: '' };
+      this._sendToPage('leerDatosFiscales', { contactId: c.contactId, origen: 'editar' });
       form.querySelector('#bx').addEventListener('click', () => this._closeBlankForm());
       form.querySelector('#bcancel').addEventListener('click', () => this._closeBlankForm());
       form.querySelector('#bsave').addEventListener('click', () => {
@@ -4854,18 +4962,91 @@ button { font-family: inherit; cursor: pointer; }
         const pre = form.querySelector('#cfTelPre').value;
         const num = form.querySelector('#cfTel').value.trim();
         const telefono = num ? `${pre} ${num}` : '';
-        this._sendToPage('editarContacto', {
+        const payloadEd = {
           contactId: c.contactId,
           nombre,
           apellido: form.querySelector('#cfApellido').value.trim(),
           telefono,
           email: form.querySelector('#cfEmail').value.trim()
-        });
+        };
+        // v1.1.117 — CIF / razón social solo si se leyeron bien y cambian.
+        const ef = this._editFiscal;
+        if (ef && ef.cargado && ef.contactId === c.contactId) {
+          const cifNuevo = form.querySelector('#cfCif').value.trim();
+          const razonNueva = form.querySelector('#cfRazon').value.trim();
+          if (cifNuevo !== ef.cif) payloadEd.cif = cifNuevo;
+          if (razonNueva !== ef.razonSocial) payloadEd.razonSocial = razonNueva;
+        }
+        this._sendToPage('editarContacto', payloadEd);
         const b = form.querySelector('#bsave'); b.textContent = 'Guardando…'; b.disabled = true;
       });
     }
 
     _closeBlankForm() { const s = this.shadowRoot.getElementById('blankScrim'); if (s) s.remove(); }
+
+    // v1.1.117 — Mensaje propio para errores al crear o editar un cliente.
+    // `err.code` lo pone recepcionLogic v2.2.0. Nunca se muestra el texto
+    // de Wix.
+    _mensajeErrorContacto(err) {
+      const code = err && err.code;
+      if (code === 'DUPLICATE_EMAIL') return 'Ese email ya lo tiene otro cliente. Búscalo en el buscador o pon otro email.';
+      if (code === 'DUPLICATE_PHONE') return 'Ese teléfono ya lo tiene otro cliente. Búscalo en el buscador o pon otro teléfono.';
+      if (code === 'DUPLICATE') return 'Ese email o teléfono ya lo tiene otro cliente. Búscalo en el buscador.';
+      return 'No se han podido guardar los datos del cliente. Revisa los datos e inténtalo de nuevo.';
+    }
+
+    // v1.1.117 — Respuesta de 'leerDatosFiscales'. `origen` dice qué
+    // formulario rellenar: 'editar' (Editar cliente), 'factura' (factura de
+    // la cita) o 'tienda' (paso de cliente de TIENDA).
+    _onDatosFiscales(p) {
+      const d = p.data || {};
+      const ok = !!d.ok;
+      const cif = ok ? String(d.cif || '') : '';
+      const razon = ok ? String(d.razonSocial || '') : '';
+      const root = this.shadowRoot;
+
+      if (p.origen === 'editar') {
+        const st = this._editFiscal;
+        if (!st || st.contactId !== p.contactId) return;
+        const iCif = root.getElementById('cfCif');
+        const iRaz = root.getElementById('cfRazon');
+        if (!iCif || !iRaz) return;                 // el modal ya se cerró
+        if (!ok) {
+          // Siguen desactivados y no se enviarán: no se toca lo guardado.
+          iCif.placeholder = 'No disponible';
+          iRaz.placeholder = 'No disponible';
+          return;
+        }
+        st.cargado = true;
+        st.cif = cif;
+        st.razonSocial = razon;
+        iCif.value = cif; iRaz.value = razon;
+        iCif.placeholder = ''; iRaz.placeholder = '';
+        iCif.disabled = false; iRaz.disabled = false;
+        return;
+      }
+
+      if (p.origen === 'factura') {
+        const r = this._modalReserva;
+        if (!ok || !r || r.contactId !== p.contactId || !this._facturaForm || this._facturaGenerando) return;
+        // Solo si el operador no ha empezado a escribir.
+        if ((this._facturaFormVatId || '').trim() || (this._facturaFormLegalName || '').trim()) return;
+        if (!cif && !razon) return;
+        this._facturaFormVatId = cif;
+        this._facturaFormLegalName = razon;
+        this._renderFacturaSlot();
+        return;
+      }
+
+      if (p.origen === 'tienda') {
+        const cli = this._cliente;
+        if (!ok || !cli || cli.contactId !== p.contactId) return;
+        const iV = root.getElementById('tdVatId');
+        const iL = root.getElementById('tdLegal');
+        if (iV && !iV.value.trim() && cif) iV.value = cif;
+        if (iL && !iL.value.trim() && razon) iL.value = razon;
+      }
+    }
 
     // ═══════════════════════════════════════════════════
     // CLIENTE PROVISIONAL — v1.1.12
@@ -6134,6 +6315,19 @@ button { font-family: inherit; cursor: pointer; }
     }
 
     // Helper: ISO → minutos desde medianoche en Madrid.
+    // v1.1.116 — CITA ENLAZADA: la otra cita del grupo entre las del día
+    // cargado (no cancelada), o null.
+    _hermanaEnlazada(r) {
+      const g = r && r.grupoEnlazado;
+      if (!g) return null;
+      return (this._reservas || []).find(x => x && x._id !== r._id && x.grupoEnlazado === g && x.status !== 'CANCELADA') || null;
+    }
+    // v1.1.116 — Servicio principal de una cita (primera línea del detalle).
+    _labelPrincipalReserva(r) {
+      const l = String((String(r?.serviciosDetail || '').split(';;')[0] || '').split('|')[0] || '').trim();
+      return l || String(r?.title || '').split(' — ')[0] || 'Servicio';
+    }
+
     _isoToMadridMin(iso) {
       if (!iso) return null;
       try {
@@ -6331,12 +6525,17 @@ button { font-family: inherit; cursor: pointer; }
       const titleMode = this._settings?.titleMode || 'cliente';
       const labelFase = opts.label || 'Servicio';
       const cliente = r.clientName || '';
+      // v1.1.116 — CITA ENLAZADA: 🔗 junto a la hora en todos sus bloques y,
+      // en el primero, el profesional de la otra cita (estilo «⛓ cascada»).
+      const herm = this._hermanaEnlazada(r);
+      const enlIcon = herm ? '<span class="ks-appt-link">🔗</span>' : '';
+      const enlFlag = (herm && opts.esFasePrincipal) ? ` <span class="ks-cascade-flag">🔗 ${esc(herm.staffName || '')}</span>` : '';
       const lineaArriba = titleMode === 'servicio'
-        ? `<span class="ks-appt-time">${hhmm}</span><span class="ks-appt-client">${esc(labelFase)}${opts.cascada && opts.esFasePrincipal ? ' <span class="ks-cascade-flag">⛓ cascada</span>' : ''}</span>`
-        : `<span class="ks-appt-time">${hhmm}</span><span class="ks-appt-client">${esc(cliente)}</span>`;
+        ? `<span class="ks-appt-time">${hhmm}</span>${enlIcon}<span class="ks-appt-client">${esc(labelFase)}${opts.cascada && opts.esFasePrincipal ? ' <span class="ks-cascade-flag">⛓ cascada</span>' : ''}${enlFlag}</span>`
+        : `<span class="ks-appt-time">${hhmm}</span>${enlIcon}<span class="ks-appt-client">${esc(cliente)}</span>`;
       const lineaAbajo = titleMode === 'servicio'
         ? `<span class="ks-appt-svc">${esc(cliente)}</span>`
-        : `<span class="ks-appt-svc">${esc(labelFase)}${opts.cascada && opts.esFasePrincipal ? '<span class="ks-cascade-flag">⛓ cascada</span>' : ''}</span>`;
+        : `<span class="ks-appt-svc">${esc(labelFase)}${opts.cascada && opts.esFasePrincipal ? '<span class="ks-cascade-flag">⛓ cascada</span>' : ''}${enlFlag}</span>`;
       // v1.1.67 — rango extendido con el minuto de las fases plegadas (tiny),
       // y línea de leyenda plegada (marcadores de 1 min, p.ej. tamaño de pelo).
       const rangoEndTxt = (opts.rangoEndMin != null) ? minToHHMM(opts.rangoEndMin) : endHHMM;
@@ -6364,7 +6563,7 @@ button { font-family: inherit; cursor: pointer; }
       // disponibilidad y no un mensaje de nadie.
       const notaCliente = String(r.notes || '').trim();
       const tieneNota = !!notaCliente && !notaCliente.includes('RECURSO INTERNO');
-      return `<button class="ks-appt ${paid ? 'is-paid' : 'is-pending'}${esMedida ? ' is-medida' : ''}${tieneNota ? ' has-nota' : ''}" data-id="${esc(r._id)}" data-fase-idx="${opts.faseIndex}" data-fase-dur="${dur}" data-fase-start="${esc(opts.startISO)}" data-draggable="${draggable}" title="${esc(labelFase)} · ${hhmm}–${endHHMM}${cliente ? ' · ' + esc(cliente) : ''}${tieneNota ? ' · ✉ Mensaje del cliente (ver Ficha técnica)' : ''}" style="top:${top}px;height:${height}px;${lanePos}--staff:${staff.color};--fam:${fam}">
+      return `<button class="ks-appt ${paid ? 'is-paid' : 'is-pending'}${esMedida ? ' is-medida' : ''}${tieneNota ? ' has-nota' : ''}" data-id="${esc(r._id)}" data-fase-idx="${opts.faseIndex}" data-fase-dur="${dur}" data-fase-start="${esc(opts.startISO)}" data-draggable="${draggable}" title="${esc(labelFase)} · ${hhmm}–${endHHMM}${cliente ? ' · ' + esc(cliente) : ''}${tieneNota ? ' · ✉ Mensaje del cliente (ver Ficha técnica)' : ''}${herm ? ' · 🔗 A la vez con ' + esc(this._labelPrincipalReserva(herm)) + ' (' + esc(herm.staffName || '') + ')' : ''}" style="top:${top}px;height:${height}px;${lanePos}--staff:${staff.color};--fam:${fam}">
         <span class="ks-appt-statusdot">${paid ? '✓' : '€'}</span>
         ${draggable ? `<span class="ks-appt-timeadj" title="Ajustar hora de inicio">🕑</span>` : ''}
         <span class="ks-appt-inner">
@@ -6872,6 +7071,17 @@ button { font-family: inherit; cursor: pointer; }
       const mostrarTachado = tienePromo || discEur > 0 || ahorroCanje > 0;
       const staffName = r.staffName || 'Sin asignar';
 
+      // v1.1.116 — CITA ENLAZADA: recuadro con la otra cita. Tocarlo la abre.
+      const hermM = this._hermanaEnlazada(r);
+      let enlBox = '';
+      if (hermM) {
+        const dH = hermM.fechaReserva ? new Date(hermM.fechaReserva) : null;
+        const hhH = dH ? dH.toLocaleTimeString('es-ES', { timeZone: 'Europe/Madrid', hour: '2-digit', minute: '2-digit', hour12: false }) : '';
+        const endHH = dH ? minToHHMM(hhmmToMin(hhH) + (Number(hermM.duracionTotal) || 0)) : '';
+        const pagH = hermM.status === 'PAGADO';
+        enlBox = `<button type="button" id="mEnl" style="display:block;width:100%;text-align:left;margin-top:8px;padding:8px 10px;border:1px solid var(--ks-line);border-radius:10px;background:var(--ks-paper2);color:var(--ks-ink);font:inherit;font-size:12px;cursor:pointer;">🔗 A la vez: <b>${esc(this._labelPrincipalReserva(hermM))}</b> · ${esc(hermM.staffName || 'Sin asignar')} · ${hhH}${endHH ? '–' + endHH : ''} · ${pagH ? 'Cobrada' : 'Pendiente'}<span style="display:block;margin-top:2px;font-size:11px;color:var(--ks-ink2);">Se cancela y se cambia de hora junto con esta cita. Se cobra por separado. Toca para abrirla.</span></button>`;
+      }
+
       const scrim = document.createElement('div'); scrim.className = 'ks-modal-scrim'; scrim.id = 'modalScrim';
       scrim.addEventListener('click', e => { if (e.target === scrim) this._closeModal(); });
       const modal = document.createElement('div'); modal.className = 'ks-modal';
@@ -6913,7 +7123,10 @@ button { font-family: inherit; cursor: pointer; }
       // y r.descuentoServicioTotal cruzando con ServiceCatalog.
       // Solo visual: NO toca el cálculo del TOTAL ni el descuento manual
       // ad-hoc del operador (siguen funcionando como antes).
-      const tienePromoSvc = r.tienePromoServicio === true && (r.descuentoServicioTotal || 0) > 0;
+      // v1.1.115 — Vale para la promo y para la oferta de smart pricing (el
+      // backend v1.0.61 manda aquí el descuento automático que gana). Con
+      // canje activo no aplica, así que no se pinta.
+      const tienePromoSvc = !this._canjeActivo && r.tienePromoServicio === true && (r.descuentoServicioTotal || 0) > 0;
       const promoBanner = tienePromoSvc
         ? `<div style="background:linear-gradient(135deg,#FF6B6B 0%,#FFE66D 50%,#4ECDC4 100%);color:#1a1a2e;padding:6px 10px;margin:-20px -22px 12px;text-align:center;font-weight:700;font-size:11px;border-radius:16px 16px 0 0;letter-spacing:.4px;">Servicio con descuento promocional <span style="background:rgba(255,255,255,.85);color:#d63031;padding:1px 6px;border-radius:10px;font-weight:800;font-size:10px;margin-left:4px;">-${(r.descuentoServicioTotal || 0).toFixed(2)}€</span></div>`
         : '';
@@ -6931,6 +7144,7 @@ button { font-family: inherit; cursor: pointer; }
         <div class="ks-modal-head"><span class="ks-modal-staff">${esc(staffName.toUpperCase())}</span><span class="ks-modal-status ${paid ? 'paid' : 'pending'}">${paid ? 'Cobrada' : 'Pendiente'}</span>${origenBadge}<button class="ks-modal-x" id="mX">✕</button></div>
         <div class="ks-modal-client">${esc(r.clientName || '')}${provBadge}</div>
         <div class="ks-modal-meta">${hhmm}${endH ? '–' + endH : ''}</div>
+        ${enlBox}
         ${contactRow}
         ${modalWarn}
         <div class="ks-modal-items">${itemsHTML}${productosHTML}</div>
@@ -6977,6 +7191,11 @@ button { font-family: inherit; cursor: pointer; }
       modal.querySelector('#mClose').addEventListener('click', () => this._closeModal());
       // v1.1.97 — FICHA DEL CLIENTE. Disponible también con la cita pagada:
       // la fórmula se anota al terminar el servicio, no antes de cobrar.
+      // v1.1.116 — abrir la cita enlazada
+      modal.querySelector('#mEnl')?.addEventListener('click', () => {
+        const h = this._hermanaEnlazada(r);
+        if (h) this._openModal(h);
+      });
       modal.querySelector('#mFichaCli')?.addEventListener('click', () => this._openFichaTecnica(r));
       if (!paid && this._puede('editarCita')) {
         this._renderDiscBox();
@@ -6984,14 +7203,25 @@ button { font-family: inherit; cursor: pointer; }
         modal.querySelectorAll('.ks-pay[data-m]').forEach(b => b.addEventListener('click', () => {
           const m = b.getAttribute('data-m');
           // v1.1.10 — recalcular total con el descuento actual
-          const rNow = this._modalReserva;
-          const subN = Number(rNow.precioTotal) || 0;
-          const dPctN = Math.min(100, Math.max(0, Number(this._disc) || 0));
-          const totalN = Math.max(0, Math.round((subN - subN * dPctN / 100) * 100) / 100);
+          // v1.1.115 — FIX: la misma cuenta que el TOTAL del modal y que
+          // _pagar (promo/oferta + rebaja manual en % o en € + canje). Antes
+          // solo aplicaba el % manual sobre el bruto y el mixto no cuadraba.
+          const { subtotal: subN, discEur: dEurN } = this._calcDescuento();
+          const canjeN = (this._canjeActivo && this._canjeActivo.ahorro > 0)
+            ? Math.round(this._canjeActivo.ahorro * 100) / 100
+            : 0;
+          const totalN = Math.max(0, Math.round((subN - dEurN - canjeN) * 100) / 100);
           if (m === 'Mixto') this._openMixto(totalN); else this._pagar(m, '');
         }));
         modal.querySelector('#mCancelRes')?.addEventListener('click', () => {
-          if (confirm('¿Cancelar esta cita? Se borrarán sus huecos del calendario.')) this._sendToPage('cancelarReserva', { reservaId: r._id });
+          // v1.1.116 — con cita enlazada, el aviso dice qué pasa con la otra.
+          const hC = this._hermanaEnlazada(r);
+          const txtC = !hC
+            ? '¿Cancelar esta cita? Se borrarán sus huecos del calendario.'
+            : (hC.status === 'PAGADO'
+                ? `¿Cancelar esta cita? Se borrarán sus huecos del calendario.\n\nVa a la vez que ${this._labelPrincipalReserva(hC)} con ${hC.staffName || 'otra profesional'}, que ya está cobrada y no se toca.`
+                : `¿Cancelar esta cita? Va a la vez que ${this._labelPrincipalReserva(hC)} con ${hC.staffName || 'otra profesional'}: se cancelarán LAS DOS y se borrarán sus huecos del calendario.`);
+          if (confirm(txtC)) this._sendToPage('cancelarReserva', { reservaId: r._id });
         });
         // v1.1.90 — Aplicar gramos de una línea con tarifa por peso.
         // Se envían GRAMOS, nunca euros: el importe lo calcula el backend
@@ -7149,6 +7379,8 @@ button { font-family: inherit; cursor: pointer; }
             this._facturaFormVatId = '';
             this._facturaFormLegalName = '';
             this._renderFacturaSlot();
+            // v1.1.117 — rellenar con el CIF y la razón social de la ficha.
+            if (r.contactId) this._sendToPage('leerDatosFiscales', { contactId: r.contactId, origen: 'factura' });
           });
         }
         return;
@@ -7217,6 +7449,8 @@ button { font-family: inherit; cursor: pointer; }
         this._facturaFormVatId = '';
         this._facturaFormLegalName = '';
         this._renderFacturaSlot();
+        // v1.1.117 — rellenar con el CIF y la razón social de la ficha.
+        if (r.contactId) this._sendToPage('leerDatosFiscales', { contactId: r.contactId, origen: 'factura' });
       });
     }
 
@@ -7244,6 +7478,15 @@ button { font-family: inherit; cursor: pointer; }
     }
     _renderDiscBox() {
       const box = this.shadowRoot.getElementById('discBox'); if (!box) return;
+      // v1.1.115 — PRECIO CERRADO. Con descuento automático (oferta de smart
+      // pricing o promo de catálogo) no se admite rebaja manual: el botón se
+      // ve en fantasma, como constancia de que ya hay un descuento aplicado.
+      if (this._calcDescuento().tienePromo) {
+        this._disc = 0;
+        this._discOpen = false;
+        box.innerHTML = `<button class="ks-disc-toggle" id="discToggle" type="button" disabled style="opacity:.45;cursor:not-allowed" title="Esta cita ya lleva un descuento automático: no admite descuentos adicionales">＋ Aplicar descuento</button>`;
+        return;
+      }
       if (this._disc > 0 || this._discOpen) {
         const mode = this._discMode || 'pct';
         const maxAttr = mode === 'eur' ? '' : 'max="100"';
@@ -7446,7 +7689,9 @@ button { font-family: inherit; cursor: pointer; }
       // `subtotal − discEur` sigue devolviendo el total neto correcto.
       const r = this._modalReserva;
       const subtotalOriginal = Number(r?.precioTotal) || 0;
-      const tienePromo = r?.tienePromoServicio === true && (Number(r?.descuentoServicioTotal) || 0) > 0;
+      // v1.1.115 — Con canje activo (bono o tarjeta) el descuento automático
+      // no se aplica: nada se acumula.
+      const tienePromo = !this._canjeActivo && r?.tienePromoServicio === true && (Number(r?.descuentoServicioTotal) || 0) > 0;
       const ahorroPromo = tienePromo
         ? Math.min(subtotalOriginal, Math.round((Number(r.descuentoServicioTotal) || 0) * 100) / 100)
         : 0;
@@ -7977,6 +8222,8 @@ button { font-family: inherit; cursor: pointer; }
         </div>`);
       box.querySelector('#tdX').addEventListener('click', () => this._closeSubModal());
       box.querySelector('#tdCancel').addEventListener('click', () => this._closeSubModal());
+      // v1.1.117 — cliente ya cargado: rellenar CIF y razón social de su ficha.
+      if (yaIdentificado) this._sendToPage('leerDatosFiscales', { contactId: cli.contactId, origen: 'tienda' });
       box.querySelector('#tdOk').addEventListener('click', () => {
         // Los datos fiscales se guardan siempre: viajan al paso de factura
         // y se persisten en la ficha del cliente al emitirla.
@@ -7994,7 +8241,11 @@ button { font-family: inherit; cursor: pointer; }
         box.querySelector('#tdOk').disabled = true;
         // Bandera: al llegar 'clienteCreado' se abre la venta directamente.
         this._tiendaEsperandoCliente = true;
-        this._sendToPage('crearCliente', { nombre, apellido, telefono, email });
+        // v1.1.117 — el CIF y la razón social se guardan ya en el alta.
+        this._sendToPage('crearCliente', {
+          nombre, apellido, telefono, email,
+          cif: this._tiendaVatId, razonSocial: this._tiendaLegalName
+        });
       });
     }
 
@@ -8407,7 +8658,11 @@ button { font-family: inherit; cursor: pointer; }
       const importeNeto = Math.max(0, Math.round((subtotal - discEur - ahorroCanje) * 100) / 100);
       const _tokens = [];
       if (tienePromo && ahorroPromo > 0) {
-        _tokens.push(`🌈 Promo -${ahorroPromo.toFixed(2)}€`);
+        // v1.1.115 — «🌈 Oferta» cuando el descuento automático es la oferta
+        // de smart pricing. Mismo prefijo 🌈 (la factura lo descarta) y sin
+        // la palabra «descuento» (el cierre no lo confunde con la rebaja).
+        const _etq = r.descuentoAutoTipo === 'oferta' ? 'Oferta' : 'Promo';
+        _tokens.push(`🌈 ${_etq} -${ahorroPromo.toFixed(2)}€`);
       }
       if (discEur > 0) {
         _tokens.push(this._discMode === 'eur'

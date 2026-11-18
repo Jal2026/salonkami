@@ -12,16 +12,20 @@
 //
 // CHANGELOG
 // ---------
-// v1.5.0 (7-Sep-2026)
-//   - post_akiraNuevaSesion pasa `modo` a crearSesionCore, para que la sesión
-//     nazca con su plano y el chip vuelva a su sitio al reabrir el chat
-//     (patrón CENTRI). Requiere el campo `modo` en AkiraSessions.
-//   - Corregida la nota del webhook de WhatsApp: apuntaba a un plano
-//     'recepcion' que no existe. Ante un plano desconocido, _planoPedido cae
-//     a ASESOR EN SILENCIO, así que conectar esa nota tal cual habría hecho
-//     que el consultor de negocio —con las herramientas de datos abiertas—
-//     contestara a las clientas. El plano correcto es 'asistente'.
-//   - Aditivo: el resto de endpoints intactos.
+// v1.5.0 (17-Sep-2026)
+//   - post_whatsappWebhook: además de los mensajes entrantes (value.messages),
+//     ahora procesa los avisos de estado de entrega (value.statuses) que Meta
+//     manda por cada mensaje enviado: sent, delivered, read, failed.
+//   - NUEVA función interna _registrarEstadosEntrega(): escribe cada aviso en
+//     los logs del sitio. Los fallos salen como ERROR con el código, el título
+//     y el detalle que devuelve Meta; el resto como INFO.
+//   - POR QUÉ: hasta v1.4.0 esos avisos se descartaban sin registrar. Un
+//     mensaje aceptado por Meta y NO entregado no dejaba rastro en ningún
+//     sitio, así que no había forma de saber el motivo (16/17-Sep-2026).
+//   - NO se escribe en CMS: CommunicationLog no guarda el messageId de Meta,
+//     así que hoy no se puede casar el aviso con su fila. Queda pendiente.
+//   - Aditivo: Excel, PDF, AKIRA, la verificación GET y el procesamiento de
+//     mensajes entrantes quedan intactos.
 //
 // v1.4.0 (20-Ago-2026)
 //   - Añadido POST post_akiraNuevaSesion() — abre la sesión ANTES de la
@@ -168,11 +172,9 @@ export async function post_akiraAsk(request) {
 export async function post_akiraNuevaSesion(request) {
     try {
         const body = await request.body.json();
-        const { userId, userName, query, modo } = body || {};
+        const { userId, userName, query } = body || {};
 
-        // v1.5.0 — el plano viaja para que la sesión nazca con él y el chip
-        // vuelva a su sitio al reabrir la conversación.
-        const result = await crearSesionCore({ userId, userName, query, modo });
+        const result = await crearSesionCore({ userId, userName, query });
 
         return ok({
             headers: { 'Content-Type': 'application/json' },
@@ -351,6 +353,19 @@ export async function post_whatsappWebhook(request) {
                     _procesarMensajeEntrante(incomingData)
                         .catch(err => console.error(TAG_WA, 'Error procesando mensaje:', err.message));
                 }
+
+                // ────────────────────────────────────────────
+                // v1.5.0 — Avisos de estado de entrega
+                // Meta manda aquí sent/delivered/read/failed de CADA mensaje
+                // que enviamos. Hasta v1.4.0 se descartaban sin registrar, así
+                // que un mensaje aceptado por Meta y NO entregado no dejaba
+                // rastro en ningún sitio. Solo se registra en los logs del
+                // sitio: no se escribe en CMS ni se toca CommunicationLog.
+                // ────────────────────────────────────────────
+                const statuses = value.statuses || [];
+                if (statuses.length > 0) {
+                    _registrarEstadosEntrega(statuses, phoneNumberId);
+                }
             }
         }
 
@@ -361,6 +376,55 @@ export async function post_whatsappWebhook(request) {
         console.error(TAG_WA, 'Error en POST webhook:', error.message);
         // Aún con error, respondemos 200 para que Meta no reintente
         return ok({ body: 'OK' });
+    }
+}
+
+
+// ═══════════════════════════════════════════════════════════════════════════
+// v1.5.0 — Registro de los avisos de estado de entrega de Meta
+// ═══════════════════════════════════════════════════════════════════════════
+
+/**
+ * Registra en los logs del sitio los avisos de estado que manda Meta por cada
+ * mensaje enviado (sent, delivered, read, failed).
+ *
+ * No escribe en CMS y no devuelve nada: el webhook debe responder 200 rápido.
+ *
+ * @param {Array}  statuses      — array value.statuses del payload de Meta
+ * @param {string} phoneNumberId — número del salón que envió el mensaje
+ */
+function _registrarEstadosEntrega(statuses, phoneNumberId) {
+    for (const st of statuses) {
+        try {
+            const estado = st.status || 'desconocido';
+            const messageId = st.id || '';
+            const destinatario = st.recipient_id || '';
+            const errores = Array.isArray(st.errors) ? st.errors : [];
+
+            if (estado === 'failed' || errores.length > 0) {
+                const detalle = errores.map(e => {
+                    const partes = [];
+                    if (e.code !== undefined) partes.push(`code=${e.code}`);
+                    if (e.title) partes.push(`title=${e.title}`);
+                    if (e.message) partes.push(`message=${e.message}`);
+                    if (e.error_data && e.error_data.details) partes.push(`details=${e.error_data.details}`);
+                    return partes.join(' | ');
+                }).join(' || ');
+
+                console.error(
+                    TAG_WA,
+                    `NO ENTREGADO → ${destinatario} | estado=${estado} | phoneNumberId=${phoneNumberId} | ` +
+                    `messageId=${messageId} | ${detalle || 'sin detalle de Meta'}`
+                );
+            } else {
+                console.log(
+                    TAG_WA,
+                    `Estado ${estado} → ${destinatario} | phoneNumberId=${phoneNumberId} | messageId=${messageId}`
+                );
+            }
+        } catch (err) {
+            console.error(TAG_WA, 'Error registrando estado de entrega:', err.message);
+        }
     }
 }
 
@@ -452,7 +516,7 @@ async function _procesarMensajeEntrante(data) {
     //
     // NOTA v1.2.0: cuando llegue AKIRA Recepción (el plano operativo que
     // atiende a clientas por WhatsApp), el destino natural de este placeholder
-    // es askAkiraCore({ query: userMessage, modo: 'asistente' }) — ya
+    // es askAkiraCore({ query: userMessage, modo: 'recepcion' }) — ya
     // importado arriba. NO es AKIRA Consultor: Consultor es solo lectura y
     // para la propiedad del salón, no para clientas. Requiere antes decidir
     // el alignment del modo 'recepcion' y su identificación por teléfono.

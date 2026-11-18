@@ -1,25 +1,22 @@
 /* ============================================================================
  * kami-area-cliente.js
  * ----------------------------------------------------------------------------
- * VERSION: 1.2.1
- *
- *   v1.2.1 — Los bonos muestran sus CONDICIONES DE ADQUISICIÓN.
- *     Hasta ahora la tarjeta enseñaba servicio, usos restantes, caducidad y
- *     código. El cliente no tenía forma de saber con qué condiciones había
- *     comprado: ni el plazo para usar cada sesión ni la espera mínima entre
- *     ellas. Se añade una línea de letra pequeña bajo la meta con las que
- *     traiga cada bono, más la fecha de compra — que es el origen desde el
- *     que se cuentan los plazos y sin la cual "21 días" no se puede situar
- *     en el calendario.
- *     Los datos vienen de clienteAreaLogic v1.6.7, del snapshot congelado en
- *     el bono al emitirlo. Condición que no aplica llega a 0 y no se pinta;
- *     con backend anterior no llega nada y la línea desaparece entera.
- *
- * VERSION: 1.2.0
- * FECHA:   1 de julio de 2026
+ * VERSION: 1.2.2
+ * FECHA:   21 de octubre de 2026
  *
  * Área de Cliente KAMISUITE — Custom Element con Shadow DOM.
  * Mismo patrón que <kami-reserva> del widget público. Tag: <kami-area-cliente>.
+ *
+ * v1.2.2 — Smart pricing: aviso al mover una cita con oferta.
+ *   NUMERACIÓN: construido sobre la 1.2.0 del repo de Hair-Times. La 1.2.1
+ *   (condiciones del bono, 21-ago-2026) se subió a mano en Salón Kami y no
+ *   está en Hair-Times; este archivo no la contiene.
+ *   - Si la cita lleva oferta y la clienta elige una hora nueva, debajo de
+ *     las horas aparece una línea: o se queda con la oferta de la nueva
+ *     hora, o la pierde si confirma. Datos de clienteAreaLogic v1.6.8
+ *     (`ofertaActualPct` y `ofertas`), puenteados por el page code v1.3.8.
+ *   - Reutiliza la clase `.hint` del propio selector: cero CSS nuevo.
+ *   - Citas sin oferta: no cambia nada.
  *
  * v1.2.0 — Multi-tenant skins completos (7 pieles).
  *   - KR_SKINS embebido ahora tiene las 7 pieles del bundle canónico:
@@ -691,6 +688,9 @@ class KamiAreaCliente extends HTMLElement {
         sel.huecosError = res.error || null;
         sel.huecosMotivo = res.motivo || null;
         sel.loadingHuecos = false;
+        // v1.2.2 — smart pricing (solo llega en citas con oferta)
+        sel.ofertaActualPct = Number(res.ofertaActualPct) || 0;
+        sel.ofertas = (res.ofertas && typeof res.ofertas === 'object') ? res.ofertas : {};
         // Si la hora elegida previamente ya no aparece, deseleccionar
         if (sel.hora && !sel.huecos.includes(sel.hora)) sel.hora = '';
         this.repaintSection('proximas');
@@ -953,9 +953,6 @@ main.content{min-width:0;display:flex;flex-direction:column;gap:20px}
 .kb-item-main{flex:1;min-width:0}
 .kb-item-ttl{font-size:14.5px;font-weight:600;margin:0 0 3px;text-wrap:pretty}
 .kb-item-meta{font-size:12.5px;color:var(--kr-ink-soft)}
-/* v1.2.1 — Condiciones de adquisición del bono. Un escalón por debajo de
-   la meta: es letra pequeña, no dato principal. */
-.kb-item-cond{margin-top:3px;font-size:11.5px;line-height:1.4;color:var(--kr-ink-soft);opacity:.85}
 .kb-item-code{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:12.5px;font-weight:600;color:var(--kr-ink);background:var(--kr-surface-2);border:1px solid var(--kr-line);border-radius:8px;padding:4px 9px;letter-spacing:.02em;flex:none}
 .kb-btn{min-width:180px;text-decoration:none;letter-spacing:.06em;text-transform:uppercase;font-weight:700}
 .kb-btn:hover{text-decoration:none}
@@ -1370,32 +1367,11 @@ textarea.nota:focus{outline:none;border-color:var(--kr-accent);box-shadow:0 0 0 
         const exp = String(b.expirationDate || '');
         const expHumana = exp ? this._fechaHumana(exp) : '';
         const usos = tot > 0 ? `${rem} / ${tot} usos` : `${rem} usos`;
-
-        /* v1.2.1 — CONDICIONES DE ADQUISICIÓN.
-           El cliente veía usos y caducidad, pero no con qué condiciones
-           compró. Se listan las que traiga el bono; las que no aplican
-           llegan a 0 y no se pintan. La fecha de compra va porque es el
-           origen desde el que se cuenta el plazo por sesión: sin ella, "21
-           días" no se puede situar en el calendario. */
-        const maxD  = Number(b.maxIntervalDays) || 0;
-        const minD  = Number(b.minIntervalDays) || 0;
-        const alta  = String(b.issueDate || '');
-        const altaH = alta ? this._fechaHumana(alta) : '';
-        const cond = [
-          maxD  ? `Usa cada sesión antes de ${maxD} días` : '',
-          minD  ? `Deja al menos ${minD} días entre sesiones` : '',
-          altaH ? `Adquirido el ${altaH}` : ''
-        ].filter(Boolean);
-        const condHTML = cond.length
-          ? `<div class="kb-item-cond">${cond.map(c => esc(c)).join(' · ')}</div>`
-          : '';
-
         return `
           <div class="kb-item">
             <div class="kb-item-main">
               <div class="kb-item-ttl">${esc(serv || 'Bono')}</div>
               <div class="kb-item-meta">${esc(usos)}${expHumana ? ` · vence ${esc(expHumana)}` : ''}</div>
-              ${condHTML}
             </div>
             ${code ? `<code class="kb-item-code">${esc(code)}</code>` : ''}
           </div>`;
@@ -1542,6 +1518,16 @@ textarea.nota:focus{outline:none;border-color:var(--kr-accent);box-shadow:0 0 0 
 
     const puede = fechaVal && horaVal && !busy && !loading;
     const btnConfirmTxt = busy ? 'Moviendo…' : 'Confirmar cambio';
+
+    // v1.2.2 — SMART PRICING. Aviso antes de confirmar en citas con oferta.
+    let avisoOferta = '';
+    const pctAct = Number(sel.ofertaActualPct) || 0;
+    if (pctAct > 0 && horaVal && huecos && huecos.includes(horaVal)) {
+      const pctNueva = Number((sel.ofertas || {})[horaVal]) || 0;
+      avisoOferta = pctNueva > 0
+        ? `<p class="hint">Esta hora también tiene oferta: tu cita se queda con un ${pctNueva}% de descuento.</p>`
+        : `<p class="hint">Esta hora no tiene oferta: si confirmas el cambio, pierdes tu descuento del ${pctAct}%.</p>`;
+    }
     return `<div class="mover">
       <h4>Mover cita con ${esc(c.profesional)}</h4>
       <p class="hint">Elige un nuevo día y hora. Mantienes el mismo servicio y profesional.</p>
@@ -1554,6 +1540,7 @@ textarea.nota:focus{outline:none;border-color:var(--kr-accent);box-shadow:0 0 0 
       </div>
       <p class="lbl-mini">Hora</p>
       ${horasBlock}
+      ${avisoOferta}
       <div class="foot">
         <button class="btn btn-ghost btn-sm" data-act="mover" data-id="${c.id}" ${busy ? 'disabled' : ''}>Cancelar</button>
         <button class="btn btn-primary btn-sm" data-act="moverConfirm" data-id="${c.id}" ${puede ? '' : 'disabled'}>${ic('check')} ${btnConfirmTxt}</button>
