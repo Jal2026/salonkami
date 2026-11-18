@@ -1,25 +1,48 @@
 /* ============================================================================
  * kami-area-cliente.js
  * ----------------------------------------------------------------------------
- * VERSION: 1.2.1
- *
- *   v1.2.1 — Los bonos muestran sus CONDICIONES DE ADQUISICIÓN.
- *     Hasta ahora la tarjeta enseñaba servicio, usos restantes, caducidad y
- *     código. El cliente no tenía forma de saber con qué condiciones había
- *     comprado: ni el plazo para usar cada sesión ni la espera mínima entre
- *     ellas. Se añade una línea de letra pequeña bajo la meta con las que
- *     traiga cada bono, más la fecha de compra — que es el origen desde el
- *     que se cuentan los plazos y sin la cual "21 días" no se puede situar
- *     en el calendario.
- *     Los datos vienen de clienteAreaLogic v1.6.7, del snapshot congelado en
- *     el bono al emitirlo. Condición que no aplica llega a 0 y no se pinta;
- *     con backend anterior no llega nada y la línea desaparece entera.
- *
- * VERSION: 1.2.0
- * FECHA:   1 de julio de 2026
+ * VERSION: 1.2.3
+ * FECHA:   18 de noviembre de 2026
  *
  * Área de Cliente KAMISUITE — Custom Element con Shadow DOM.
  * Mismo patrón que <kami-reserva> del widget público. Tag: <kami-area-cliente>.
+ *
+ * v1.2.3 — UNIÓN DE LAS DOS RAMAS DEL ARCHIVO (18-nov-2026).
+ *   La 1.2.2 (Hair-Times: aviso de oferta al mover una cita) más la 1.2.1
+ *   (Salón Kami: condiciones de adquisición de los bonos), copiada literal
+ *   del repo de Salón Kami:
+ *   - Bajo la meta de cada bono, una línea de letra pequeña con las
+ *     condiciones que traiga (plazo por sesión y días entre sesiones) y la
+ *     fecha de compra. Lo que no aplica llega a 0 y no se pinta; con un
+ *     backend anterior a clienteAreaLogic 1.7.2 no llega nada y la línea
+ *     no sale.
+ *   - Una clase CSS nueva, .kb-item-cond (la de la 1.2.1).
+ *   Nada más cambia. Mismo archivo para Hair-Times y Salón Kami.
+ *   Pareja: clienteAreaLogic 1.7.2.
+ *
+ * v1.2.2 — Smart pricing: aviso al mover una cita con oferta.
+ *   NUMERACIÓN: construido sobre la 1.2.0 del repo de Hair-Times. La 1.2.1
+ *   (condiciones del bono, 21-ago-2026) se subió a mano en Salón Kami y no
+ *   está en Hair-Times; este archivo no la contiene.
+ *   - Si la cita lleva oferta y la clienta elige una hora nueva, debajo de
+ *     las horas aparece una línea: o se queda con la oferta de la nueva
+ *     hora, o la pierde si confirma. Datos de clienteAreaLogic v1.6.8
+ *     (`ofertaActualPct` y `ofertas`), puenteados por el page code v1.3.8.
+ *   - Reutiliza la clase `.hint` del propio selector: cero CSS nuevo.
+ *   - Citas sin oferta: no cambia nada.
+ *
+ * v1.2.1 — Los bonos muestran sus CONDICIONES DE ADQUISICIÓN.
+ *   (Rama Salón Kami, 21-ago-2026. Incorporada aquí en la 1.2.3.)
+ *   Hasta ahora la tarjeta enseñaba servicio, usos restantes, caducidad y
+ *   código. El cliente no tenía forma de saber con qué condiciones había
+ *   comprado: ni el plazo para usar cada sesión ni la espera mínima entre
+ *   ellas. Se añade una línea de letra pequeña bajo la meta con las que
+ *   traiga cada bono, más la fecha de compra — que es el origen desde el
+ *   que se cuentan los plazos y sin la cual "21 días" no se puede situar
+ *   en el calendario.
+ *   Los datos vienen de clienteAreaLogic v1.6.7, del snapshot congelado en
+ *   el bono al emitirlo. Condición que no aplica llega a 0 y no se pinta;
+ *   con backend anterior no llega nada y la línea desaparece entera.
  *
  * v1.2.0 — Multi-tenant skins completos (7 pieles).
  *   - KR_SKINS embebido ahora tiene las 7 pieles del bundle canónico:
@@ -691,6 +714,9 @@ class KamiAreaCliente extends HTMLElement {
         sel.huecosError = res.error || null;
         sel.huecosMotivo = res.motivo || null;
         sel.loadingHuecos = false;
+        // v1.2.2 — smart pricing (solo llega en citas con oferta)
+        sel.ofertaActualPct = Number(res.ofertaActualPct) || 0;
+        sel.ofertas = (res.ofertas && typeof res.ofertas === 'object') ? res.ofertas : {};
         // Si la hora elegida previamente ya no aparece, deseleccionar
         if (sel.hora && !sel.huecos.includes(sel.hora)) sel.hora = '';
         this.repaintSection('proximas');
@@ -1542,6 +1568,16 @@ textarea.nota:focus{outline:none;border-color:var(--kr-accent);box-shadow:0 0 0 
 
     const puede = fechaVal && horaVal && !busy && !loading;
     const btnConfirmTxt = busy ? 'Moviendo…' : 'Confirmar cambio';
+
+    // v1.2.2 — SMART PRICING. Aviso antes de confirmar en citas con oferta.
+    let avisoOferta = '';
+    const pctAct = Number(sel.ofertaActualPct) || 0;
+    if (pctAct > 0 && horaVal && huecos && huecos.includes(horaVal)) {
+      const pctNueva = Number((sel.ofertas || {})[horaVal]) || 0;
+      avisoOferta = pctNueva > 0
+        ? `<p class="hint">Esta hora también tiene oferta: tu cita se queda con un ${pctNueva}% de descuento.</p>`
+        : `<p class="hint">Esta hora no tiene oferta: si confirmas el cambio, pierdes tu descuento del ${pctAct}%.</p>`;
+    }
     return `<div class="mover">
       <h4>Mover cita con ${esc(c.profesional)}</h4>
       <p class="hint">Elige un nuevo día y hora. Mantienes el mismo servicio y profesional.</p>
@@ -1554,6 +1590,7 @@ textarea.nota:focus{outline:none;border-color:var(--kr-accent);box-shadow:0 0 0 
       </div>
       <p class="lbl-mini">Hora</p>
       ${horasBlock}
+      ${avisoOferta}
       <div class="foot">
         <button class="btn btn-ghost btn-sm" data-act="mover" data-id="${c.id}" ${busy ? 'disabled' : ''}>Cancelar</button>
         <button class="btn btn-primary btn-sm" data-act="moverConfirm" data-id="${c.id}" ${puede ? '' : 'disabled'}>${ic('check')} ${btnConfirmTxt}</button>
