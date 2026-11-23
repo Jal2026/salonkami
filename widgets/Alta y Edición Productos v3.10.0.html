@@ -1,0 +1,2243 @@
+<!doctype html>
+<html lang="es">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>KAMISUITE — Alta y Edición Productos</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Bai+Jamjuree:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <style>
+    /* ═══════════════════════════════════════════════════
+       KAMISUITE — Alta y Edición Productos v3.10.0
+       Dark theme (same as Catálogo / Checkout)
+       v3.10.0 (13 Sep 2026): el porcentaje ya no se calcula aquí:
+              viene resuelto del backend (v1.4.3), que usa el
+              descuento guardado en Wix cuando está en PERCENT.
+              Con precio 19,85 y un 10%, Wix cobra 17,87 y la
+              rebaja deducida daba 9,97: la ficha decía -9% con
+              un 10% escrito.
+              Además, los botones dicen la verdad: con oferta
+              puesta, ACTIVAR pasa a ACTUALIZAR; sin oferta,
+              QUITAR queda apagado.
+       v3.9.1 (13 Sep 2026): FIX del porcentaje. El redondeo hacia
+              abajo de la v3.9.0 arrastraba el error de coma
+              flotante: 13,50 € rebajados a 12,15 € daban
+              9,999999998 y se pintaba -9% en vez de -10%. Se
+              aplica una tolerancia antes de redondear.
+       v3.9.0 (13 Sep 2026): la oferta se pone en PORCENTAJE o en
+              EUROS, con el mismo selector que el panel de Wix.
+              Los dos campos van enlazados: se escriba por donde
+              se escriba, el otro se recalcula sobre el precio.
+              La ficha abre con el tipo REAL que Wix tiene
+              guardado, así que una oferta puesta desde el panel
+              de Wix se lee bien.
+              El porcentaje de la tarjeta se redondea hacia
+              abajo: 23,00 € a 10,00 € es -56%, no -57%.
+       v3.8.0 (13 Sep 2026): + PRECIO PROMOCIONAL. La ficha
+              permite poner y quitar el precio de oferta, y la
+              tarjeta muestra el precio anterior tachado junto
+              al promocional, con el porcentaje de rebaja.
+              El precio original NUNCA se modifica: Wix lo
+              conserva y lo pinta tachado en la tienda.
+              La oferta se aplica al pulsar ACTIVAR, no al
+              GUARDAR: es una llamada aparte al backend.
+       v3.0: + módulo Almacén (descontar unidad, stock editable,
+              lectura coste real). Sin venta, sin cliente,
+              sin historial.
+       v3.3.0: coste solo lectura en el editor (se gestiona
+              desde Almacén).
+       v3.7.1 (29 Ago 2026): el aviso de categorías incompletas
+              era solo un mensaje pasajero y el botón cambiaba a
+              "GUARDAR IGUALMENTE" sin decir por qué. Ahora sale
+              una ventana que explica qué falta y qué pasa si se
+              guarda así, con dos salidas claras: volver a elegir
+              categorías, o guardar de todos modos.
+       v3.7.0 (28 Ago 2026): + DUPLICAR PRODUCTO (botón ⧉ en la
+              tarjeta, junto al lápiz). Wix no gestiona variantes
+              por Velo: la vía para tener el mismo producto en
+              varios tamaños es duplicarlo y cambiar el tamaño en
+              el nombre. Mismo patrón que el duplicado de
+              servicios.
+              La copia nace oculta, sin SKU y con "(copia)" en el
+              nombre, y al terminar se abre su ficha para
+              editarla. Hereda precio, marca, descripción,
+              información adicional, fotos y categorías.
+       v3.6.1 (28 Ago 2026): se aclara qué es el listado de
+              tipos. Antes el botón ponía solo "Ver tipos de
+              producto" y podía leerse como si fueran las
+              categorías de la tienda. Ahora se llama
+              "Categorías según tipos de producto sugeridas" y el
+              panel abre con una línea explicando que son
+              sugerencias para nombrar, no las categorías
+              existentes.
+       v3.6.0 (28 Ago 2026): CATEGORÍAS — guía y control.
+              La tienda pública de Wix solo sabe filtrar por
+              categoría: no puede filtrar por marca. La forma de
+              tener filtro de marca es que cada producto esté en
+              dos categorías, una de tipo de producto y otra con
+              el nombre de la marca. Si el salón no lo hace, el
+              producto desaparece de los filtros de la tienda.
+              · Leyenda fija sobre el cajetín de categorías
+                explicando las tres que hay que marcar.
+              · Botón que despliega el vocabulario de tipos de
+                producto, como consulta. Es una lista de
+                referencia para nombrar bien, NO una validación
+                contra las categorías existentes.
+              · Al guardar se cuentan las categorías marcadas sin
+                contar la general de Wix. Si hay menos de dos, se
+                avisa y hay que confirmar para guardar igual.
+              · Aviso permanente: una categoría nueva hay que
+                comunicarla a KAMISUITE para darla de alta en los
+                filtros de la tienda pública.
+              · Cajetín de categorías más alto (120 → 220 px).
+       v3.5.1 (28 Ago 2026): leyendas de redacción bajo la
+              descripción larga y la descripción corta, para
+              orientar al salón sobre extensión y tono.
+       v3.5.0 (28 Ago 2026): los cuatro bloques de INFORMACIÓN
+              ADICIONAL pasan de cuadros de texto plano a
+              editores con formato (negrita, cursiva, viñetas y
+              saltos de línea). Antes, el HTML que el salón o
+              Jal maquetaban desde el Dashboard de Wix Stores se
+              abría aquí como código a la vista (<ul>, <li>…),
+              y cualquier salto de línea escrito en el cuadro se
+              perdía al mostrarse porque el campo se pinta como
+              HTML. Ahora el contenido se ve maquetado, se edita
+              con botones, y lo que se guarda es el mismo HTML
+              que entiende el Dashboard: los dos lados editan lo
+              mismo sin pisarse.
+              · Al pegar texto se pega en limpio, sin arrastrar
+                formato de Word ni de una web.
+              · Al guardar se depuran las etiquetas: solo salen
+                ul, ol, li, b, strong, i, em, u y br. El resto se
+                descarta conservando el texto.
+              · Un bloque que quede sin texto se guarda vacío,
+                sin etiquetas sueltas.
+       v3.4.0 (28 Ago 2026): FIX — el filtro de categoría se
+              perdía al guardar. Cada refresco del listado
+              reconstruía el desplegable de categorías desde
+              cero, y al reescribir sus opciones el navegador
+              dejaba la selección en "Todas las categorías".
+              Ahora se guarda la categoría elegida antes de
+              reconstruir el desplegable y se restaura después,
+              siempre que esa categoría siga existiendo. El
+              buscador y el filtro de visibilidad no se veían
+              afectados porque no se reconstruyen.
+       ═══════════════════════════════════════════════════ */
+    :root {
+      --bg: #0f1117;
+      --surface: #181b23;
+      --surface2: #1e222c;
+      --surface3: #252a36;
+      --border: rgba(255,255,255,.08);
+      --border-hover: rgba(255,255,255,.18);
+      --text: #e8e9ed;
+      --text-secondary: rgba(255,255,255,.65);
+      --muted: rgba(255,255,255,.40);
+      --accent: #c9a44a;
+      --accent-dim: rgba(201,164,74,.15);
+      --green: #36c06a;
+      --green-dim: rgba(54,192,106,.12);
+      --red: #e85454;
+      --red-dim: rgba(232,84,84,.12);
+      --blue: #4a9ec9;
+      --blue-dim: rgba(74,158,201,.12);
+      --yellow: #e5c44a;
+      --radius: 10px;
+      --radius-sm: 6px;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: "Bai Jamjuree", sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      min-height: 100vh;
+      padding: 12px 14px;
+    }
+
+    /* ═══ HEADER ═══ */
+    .header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+    .header-brand {
+      font-size: 12px; font-weight: 600;
+      letter-spacing: 2px; text-transform: uppercase;
+      color: var(--accent);
+    }
+    .header-version {
+      font-size: 10px; color: var(--muted); letter-spacing: .5px;
+    }
+
+    /* ═══ TOOLBAR ═══ */
+    .toolbar {
+      display: flex; gap: 8px; align-items: center;
+      flex-wrap: wrap; margin-bottom: 10px;
+    }
+    .search-box {
+      flex: 1; min-width: 180px;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); color: var(--text);
+      font-family: inherit; font-size: 12px;
+      padding: 8px 10px 8px 32px; outline: none;
+      transition: border-color .2s;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' fill='none' stroke='rgba(255,255,255,.35)' stroke-width='2'%3E%3Ccircle cx='6' cy='6' r='4.5'/%3E%3Cline x1='9.5' y1='9.5' x2='13' y2='13'/%3E%3C/svg%3E");
+      background-repeat: no-repeat; background-position: 10px center;
+    }
+    .search-box:focus { border-color: var(--accent); }
+    .search-box::placeholder { color: var(--muted); }
+
+    .filter-select {
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      color: var(--text-secondary);
+      border-radius: var(--radius-sm);
+      padding: 7px 28px 7px 10px;
+      font-family: inherit;
+      font-weight: 500;
+      font-size: 11px;
+      cursor: pointer;
+      outline: none;
+      appearance: none;
+      -webkit-appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='6'%3E%3Cpath d='M0 0l5 6 5-6z' fill='rgba(255,255,255,.3)'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 10px center;
+      transition: border-color .2s;
+    }
+    .filter-select:focus { border-color: var(--accent); }
+
+    .toolbar-sep {
+      width: 1px; height: 20px; background: var(--border); flex-shrink: 0;
+    }
+    .counter {
+      font-size: 11px; font-weight: 600;
+      color: var(--muted); letter-spacing: .3px; white-space: nowrap;
+    }
+    .counter strong { color: var(--accent); }
+
+    .btn-toolbar-action {
+      background: var(--surface2); border: 1px solid var(--accent);
+      color: var(--accent); border-radius: var(--radius-sm);
+      padding: 6px 14px; font-family: inherit; font-size: 11px;
+      font-weight: 700; cursor: pointer; white-space: nowrap;
+      transition: all .15s;
+    }
+    .btn-toolbar-action:hover { background: var(--accent-dim); }
+
+    /* ═══ LOADING ═══ */
+    .loading {
+      display: flex; flex-direction: column;
+      align-items: center; justify-content: center;
+      gap: 12px; padding: 60px 20px;
+      color: var(--muted); font-size: 13px;
+    }
+    .spinner {
+      width: 28px; height: 28px;
+      border: 2.5px solid var(--border);
+      border-top-color: var(--accent);
+      border-radius: 50%;
+      animation: spin .8s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .error-msg {
+      background: var(--red-dim); border: 1px solid rgba(232,84,84,.25);
+      border-radius: var(--radius); padding: 16px 20px;
+      color: var(--red); font-size: 12px; font-weight: 500;
+    }
+
+    /* ═══ PRODUCT GRID ═══ */
+    .products {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+      gap: 10px;
+    }
+
+    .prod-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+      transition: border-color .2s, box-shadow .2s;
+      display: flex;
+      flex-direction: column;
+    }
+    .prod-card:hover {
+      border-color: var(--border-hover);
+      box-shadow: 0 2px 12px rgba(0,0,0,.25);
+    }
+    .prod-card.not-visible { border-color: rgba(201,164,74,.35); }
+    .prod-card.not-visible .prod-name { color: var(--accent); }
+    .prod-card.not-visible .hidden-chip { display: inline-block; }
+
+    .prod-img-wrap {
+      width: 100%; height: 140px;
+      background: var(--surface2);
+      display: flex; align-items: center; justify-content: center;
+      overflow: hidden; position: relative;
+    }
+    .prod-img { width: 100%; height: 100%; object-fit: cover; }
+    .prod-img-placeholder { font-size: 32px; color: var(--muted); opacity: .3; }
+    .hidden-chip {
+      display: none; position: absolute; top: 8px; right: 8px;
+      font-size: 8px; font-weight: 700; letter-spacing: 1px;
+      color: var(--red); background: var(--red-dim);
+      border: 1px solid rgba(232,84,84,.30); padding: 2px 6px; border-radius: 3px;
+    }
+    .ribbon-chip {
+      position: absolute; top: 8px; left: 8px;
+      font-size: 8px; font-weight: 700; letter-spacing: .5px;
+      color: #fff; background: var(--accent);
+      padding: 2px 7px; border-radius: 3px;
+    }
+    .media-count-chip {
+      position: absolute; bottom: 6px; left: 6px;
+      font-size: 8px; font-weight: 700; color: #fff;
+      background: rgba(0,0,0,.6);
+      padding: 1px 5px; border-radius: 3px;
+    }
+
+    .prod-body {
+      padding: 12px 14px;
+      display: flex; flex-direction: column; gap: 6px; flex: 1;
+    }
+    .prod-name { font-size: 13px; font-weight: 700; color: var(--text); line-height: 1.3; }
+    .prod-sku { font-size: 9px; font-family: 'Courier New', monospace; color: var(--muted); letter-spacing: .3px; }
+    .prod-price-row {
+      display: flex; align-items: baseline; justify-content: space-between;
+      margin-top: auto; padding-top: 4px;
+    }
+    .prod-price { font-size: 18px; font-weight: 700; color: var(--accent); letter-spacing: -.3px; }
+    /* v3.9.0: selector de unidad del descuento (% o €) */
+    .promo-desc-wrap { display: flex; align-items: stretch; }
+    .promo-desc-wrap .modal-input {
+      flex: 1; border-top-right-radius: 0; border-bottom-right-radius: 0;
+    }
+    .promo-unit {
+      background: var(--surface2); border: 1px solid var(--border);
+      border-left: none; color: var(--muted); font-family: inherit;
+      font-size: 12px; font-weight: 700; padding: 0 11px; cursor: pointer;
+    }
+    .promo-unit:last-child { border-radius: 0 var(--radius-sm) var(--radius-sm) 0; }
+    .promo-unit-on { background: var(--accent-dim); color: var(--accent); }
+    .promo-unit:disabled { opacity: .5; cursor: not-allowed; }
+
+    /* v3.8.0: precio anterior tachado + porcentaje de rebaja */
+    .prod-price-old {
+      font-size: 12px; font-weight: 600; color: var(--muted);
+      text-decoration: line-through; margin-right: 6px;
+    }
+    .promo-chip {
+      font-size: 9px; font-weight: 700; letter-spacing: .5px;
+      padding: 2px 5px; border-radius: 3px; margin-left: 6px;
+      background: var(--accent-dim); color: var(--accent);
+    }
+    .prod-type {
+      font-size: 9px; font-weight: 600; letter-spacing: .5px; text-transform: uppercase;
+      color: var(--muted); padding: 2px 6px; background: var(--surface3);
+      border-radius: 3px; align-self: flex-start;
+    }
+
+    /* v3.0: stock line */
+    .prod-stock {
+      font-size: 10px; font-weight: 700; margin-top: 2px;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .prod-stock.stock-ok   { color: var(--green); }
+    .prod-stock.stock-low  { color: var(--yellow); }
+    .prod-stock.stock-zero { color: var(--red); }
+    .prod-stock.stock-untracked { color: var(--muted); font-weight: 500; }
+    .prod-stock-num {
+      background: var(--surface3); padding: 1px 6px; border-radius: 3px;
+      font-family: 'Courier New', monospace; font-size: 11px;
+    }
+
+    /* Edit + Decrement actions */
+    .prod-action {
+      padding: 0 14px 12px;
+      display: flex; gap: 6px; align-items: center;
+    }
+    .btn-edit {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--accent); font-size: 13px; padding: 8px 10px;
+      border-radius: var(--radius-sm); cursor: pointer;
+      transition: all .15s; flex-shrink: 0;
+    }
+    .btn-edit:hover { border-color: var(--accent); background: var(--accent-dim); }
+
+    /* v3.7.0: duplicar producto */
+    .btn-dup {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--blue); font-size: 13px; padding: 8px 10px;
+      border-radius: var(--radius-sm); cursor: pointer;
+      transition: all .15s; flex-shrink: 0;
+    }
+    .btn-dup:hover { border-color: var(--blue); background: var(--blue-dim); }
+    .btn-dup.busy { opacity: .45; cursor: wait; }
+
+    /* v3.0: botón DESCONTAR sustituye al antiguo VENTA */
+    .btn-decrement {
+      flex: 1; background: var(--red); border: none; color: #fff;
+      font-family: inherit; font-size: 11px; font-weight: 700;
+      letter-spacing: .8px; text-transform: uppercase;
+      padding: 8px 12px; border-radius: var(--radius-sm);
+      cursor: pointer; transition: all .15s;
+    }
+    .btn-decrement:hover { filter: brightness(1.15); }
+    .btn-decrement:active { transform: translateY(1px); }
+    .btn-decrement:disabled { opacity: .4; cursor: not-allowed; filter: none; }
+    .btn-decrement.processing { background: var(--accent); }
+
+    /* ═══ TOAST ═══ */
+    .toast {
+      position: fixed; bottom: 20px; left: 50%;
+      transform: translateX(-50%) translateY(60px);
+      background: var(--surface3);
+      border: 1px solid var(--border-hover);
+      color: var(--text); font-family: inherit;
+      font-size: 12px; font-weight: 600;
+      padding: 8px 18px; border-radius: var(--radius);
+      opacity: 0; transition: all .3s ease;
+      pointer-events: none; z-index: 999;
+      max-width: 90%;
+    }
+    .toast.show {
+      transform: translateX(-50%) translateY(0);
+      opacity: 1;
+      pointer-events: auto;
+    }
+    .toast.toast-error { border-color: rgba(232,84,84,.4); color: var(--red); }
+
+    /* ═══ EMPTY / FOOTER ═══ */
+    .empty-state {
+      text-align: center; padding: 40px 20px;
+      color: var(--muted); font-size: 13px;
+    }
+    .footer {
+      margin-top: 14px; padding: 10px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      display: flex; gap: 16px; flex-wrap: wrap; align-items: center;
+    }
+    .footer-item {
+      font-size: 10px; font-weight: 600; color: var(--muted); letter-spacing: .3px;
+    }
+    .footer-item strong { color: var(--text-secondary); }
+
+    /* ═══════════════════════════════════════════════════
+       MODALES
+       ═══════════════════════════════════════════════════ */
+    .modal-overlay {
+      position: fixed; inset: 0; background: rgba(0,0,0,.7);
+      z-index: 1000; display: flex; align-items: flex-start;
+      justify-content: center; padding: 30px 12px;
+      overflow-y: auto;
+    }
+    .modal-box {
+      background: var(--surface); border: 1px solid var(--border-hover);
+      border-radius: var(--radius); width: 100%; max-width: 520px;
+      box-shadow: 0 8px 40px rgba(0,0,0,.5);
+    }
+    .modal-box-sm { max-width: 380px; }
+    .modal-header {
+      display: flex; align-items: center; justify-content: space-between;
+      padding: 14px 18px; border-bottom: 1px solid var(--border);
+    }
+    .modal-title { font-size: 14px; font-weight: 700; color: var(--accent); }
+    .modal-close {
+      background: none; border: none; color: var(--muted); font-size: 18px;
+      cursor: pointer; padding: 4px 8px; transition: color .15s;
+    }
+    .modal-close:hover { color: var(--red); }
+    .modal-body { padding: 16px 18px; display: flex; flex-direction: column; gap: 10px; }
+    .modal-footer {
+      display: flex; align-items: center; gap: 8px;
+      padding: 12px 18px; border-top: 1px solid var(--border);
+    }
+    .modal-row { display: flex; gap: 10px; }
+    .modal-row > .modal-field { flex: 1; }
+    .modal-field { display: flex; flex-direction: column; gap: 3px; }
+    .modal-label {
+      font-size: 9px; font-weight: 700; color: var(--accent);
+      letter-spacing: .5px; text-transform: uppercase;
+    }
+    .modal-input {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: var(--radius-sm);
+      padding: 8px 10px; font-family: inherit; font-size: 12px;
+      font-weight: 500; outline: none; transition: border-color .2s;
+    }
+    .modal-input:focus { border-color: var(--accent); }
+    .modal-input::placeholder { color: var(--muted); }
+    .modal-input:disabled {
+      opacity: .55; cursor: not-allowed; background: var(--surface3);
+    }
+    .modal-textarea {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: var(--radius-sm);
+      padding: 8px 10px; font-family: inherit; font-size: 12px;
+      font-weight: 500; outline: none; resize: vertical; min-height: 60px;
+      transition: border-color .2s;
+    }
+    .modal-textarea:focus { border-color: var(--accent); }
+    .modal-textarea::placeholder { color: var(--muted); }
+
+    /* ═══ v3.5.0: editor con formato (información adicional) ═══ */
+    .rt-toolbar {
+      display: flex; gap: 4px; margin-bottom: 4px;
+    }
+    .rt-btn {
+      background: var(--surface3); border: 1px solid var(--border);
+      color: var(--text-secondary); border-radius: var(--radius-sm);
+      min-width: 26px; height: 24px; padding: 0 7px;
+      font-family: inherit; font-size: 11px; font-weight: 700;
+      cursor: pointer; transition: border-color .2s, color .2s;
+    }
+    .rt-btn:hover { border-color: var(--border-hover); color: var(--text); }
+    .rt-btn-i { font-style: italic; }
+    .rt-btn-u { text-decoration: underline; }
+    .rt-editor {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--text); border-radius: var(--radius-sm);
+      padding: 8px 10px; font-family: inherit; font-size: 12px;
+      font-weight: 500; outline: none; min-height: 60px;
+      max-height: 220px; overflow-y: auto;
+      transition: border-color .2s;
+    }
+    .rt-editor:focus { border-color: var(--accent); }
+    .rt-editor:empty:before {
+      content: attr(data-placeholder);
+      color: var(--muted);
+    }
+    .rt-editor ul, .rt-editor ol { margin: 4px 0; padding-left: 18px; }
+    .rt-editor li { margin: 2px 0; }
+
+    .modal-section-sep {
+      border: none;
+      border-top: 1px solid var(--border);
+      margin: 2px 0;
+    }
+    .modal-section-title {
+      font-size: 9px; font-weight: 700; color: var(--blue);
+      letter-spacing: 1px; text-transform: uppercase;
+      padding: 4px 0 2px;
+    }
+
+    /* ═══ v3.6.0: guía de categorías ═══ */
+    .cat-guia {
+      background: var(--surface3); border: 1px solid var(--border);
+      border-left: 3px solid var(--accent);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px; margin-bottom: 6px;
+      font-size: 10px; font-weight: 500; line-height: 1.55;
+      color: var(--text-secondary);
+    }
+    .cat-guia b { color: var(--text); font-weight: 700; }
+    .cat-guia-aviso {
+      display: block; margin-top: 6px;
+      padding-top: 6px; border-top: 1px solid var(--border);
+      color: var(--yellow);
+    }
+    .btn-tipos {
+      background: var(--surface3); border: 1px solid var(--border);
+      color: var(--text-secondary); border-radius: var(--radius-sm);
+      padding: 5px 10px; font-family: inherit; font-size: 10px;
+      font-weight: 700; letter-spacing: .5px; text-transform: uppercase;
+      cursor: pointer; margin-bottom: 6px;
+      transition: border-color .2s, color .2s;
+    }
+    .btn-tipos:hover { border-color: var(--accent); color: var(--text); }
+    .tipos-panel {
+      display: none;
+      background: var(--surface2); border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 10px; margin-bottom: 6px;
+      max-height: 200px; overflow-y: auto;
+      font-size: 10px; line-height: 1.6; color: var(--text-secondary);
+    }
+    .tipos-panel.open { display: block; }
+    .tipos-intro {
+      color: var(--muted); font-size: 10px; line-height: 1.5;
+      padding-bottom: 6px; margin-bottom: 6px;
+      border-bottom: 1px solid var(--border);
+    }
+    .tipos-grupo { color: var(--accent); font-weight: 700; text-transform: uppercase;
+      letter-spacing: .5px; margin-top: 6px; }
+    .tipos-grupo:first-child { margin-top: 0; }
+
+    .modal-hint {
+      font-size: 10px; color: var(--muted); font-weight: 500;
+      margin-top: 2px;
+    }
+
+    .btn-modal-save {
+      background: var(--green); border: none; color: #fff;
+      font-family: inherit; font-size: 11px; font-weight: 700;
+      padding: 8px 18px; border-radius: var(--radius-sm);
+      cursor: pointer; letter-spacing: .5px;
+    }
+    .btn-modal-save:hover { filter: brightness(1.15); }
+    .btn-modal-save:disabled { opacity: .5; cursor: not-allowed; }
+    .btn-modal-cancel {
+      background: var(--surface2); border: 1px solid var(--border);
+      color: var(--muted); font-family: inherit; font-size: 11px;
+      font-weight: 600; padding: 8px 14px; border-radius: var(--radius-sm); cursor: pointer;
+    }
+    .btn-modal-cancel:hover { border-color: var(--red); color: var(--red); }
+    .btn-delete-product {
+      background: var(--red-dim); border: 1px solid rgba(232,84,84,.3);
+      color: var(--red); font-family: inherit; font-size: 10px;
+      font-weight: 700; padding: 7px 12px; border-radius: var(--radius-sm); cursor: pointer;
+    }
+    .btn-delete-product:hover { border-color: var(--red); background: rgba(232,84,84,.2); }
+    .btn-delete-confirm {
+      background: var(--red); border: none; color: #fff;
+      font-family: inherit; font-size: 11px; font-weight: 700;
+      padding: 8px 16px; border-radius: var(--radius-sm); cursor: pointer;
+    }
+    .btn-delete-confirm:disabled { opacity: .4; cursor: not-allowed; }
+
+    .cat-checkboxes {
+      display: flex; flex-wrap: wrap; gap: 6px;
+      max-height: 220px; overflow-y: auto;
+      padding: 6px; background: var(--surface2);
+      border: 1px solid var(--border); border-radius: var(--radius-sm);
+    }
+    .cat-checkbox {
+      display: flex; align-items: center; gap: 4px;
+      font-size: 11px; color: var(--text-secondary); font-weight: 500;
+      padding: 3px 8px; background: var(--surface3);
+      border-radius: 3px; cursor: pointer; white-space: nowrap;
+    }
+    .cat-checkbox input { cursor: pointer; accent-color: var(--accent); }
+
+    .toggle-wrap {
+      display: flex; align-items: center; gap: 6px; padding: 8px 0;
+    }
+    .toggle-wrap label {
+      font-size: 11px; color: var(--text-secondary); cursor: pointer;
+      display: flex; align-items: center; gap: 6px;
+    }
+    .toggle-wrap input {
+      cursor: pointer; accent-color: var(--accent);
+      width: 16px; height: 16px;
+    }
+
+    /* GALERÍA MULTI-IMAGEN */
+    .img-gallery {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      padding: 8px;
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      min-height: 50px;
+      align-items: center;
+    }
+    .img-gallery-empty {
+      font-size: 11px;
+      color: var(--muted);
+    }
+    .img-thumb {
+      width: 80px;
+      height: 80px;
+      border-radius: 4px;
+      overflow: hidden;
+      position: relative;
+      border: 2px solid var(--border);
+      flex-shrink: 0;
+    }
+    .img-thumb img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      display: block;
+    }
+    .img-thumb.marked {
+      opacity: .3;
+      border-color: var(--red);
+    }
+    .img-thumb.new-img {
+      border-color: var(--green);
+    }
+    .img-thumb-x {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 20px;
+      height: 20px;
+      background: rgba(0,0,0,.75);
+      color: #fff;
+      border: none;
+      border-radius: 50%;
+      font-size: 11px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      line-height: 1;
+    }
+    .img-thumb-x:hover { background: var(--red); }
+    .img-thumb.marked .img-thumb-x { background: var(--green); }
+    .btn-add-images {
+      background: var(--surface3);
+      border: 1px dashed var(--border);
+      color: var(--muted);
+      font-family: inherit;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 6px 14px;
+      border-radius: var(--radius-sm);
+      cursor: pointer;
+      margin-top: 4px;
+      transition: all .15s;
+    }
+    .btn-add-images:hover { border-color: var(--accent); color: var(--accent); }
+  </style>
+</head>
+<body>
+
+  <!-- HEADER -->
+  <div class="header">
+    <span class="header-brand">KAMISUITE · Alta y Edición Productos</span>
+    <span class="header-version">v3.10.0</span>
+  </div>
+
+  <!-- TOOLBAR -->
+  <div class="toolbar" id="toolbar" style="display:none;">
+    <input type="text" class="search-box" id="searchBox" placeholder="Buscar producto...">
+    <select class="filter-select" id="filterCollection" style="display:none;">
+      <option value="">Todas las categorías</option>
+    </select>
+    <select class="filter-select" id="filterVisibility">
+      <option value="">Todos</option>
+      <option value="visible">Solo VISIBLES</option>
+      <option value="hidden">Solo OCULTOS</option>
+    </select>
+    <div class="toolbar-sep"></div>
+    <span class="counter" id="counter"></span>
+    <div class="toolbar-sep"></div>
+    <button class="btn-toolbar-action" id="btnNuevoProducto">+ PRODUCTO</button>
+    <button class="btn-toolbar-action" id="btnNuevaCategoria" style="border-color:var(--blue);color:var(--blue);">+ CATEGORÍA</button>
+  </div>
+
+  <!-- CONTENT (product grid) -->
+  <div id="content">
+    <div class="loading">
+      <div class="spinner"></div>
+      <span>Cargando productos…</span>
+    </div>
+  </div>
+
+  <!-- FOOTER -->
+  <div class="footer" id="footer" style="display:none;"></div>
+
+  <!-- ═══════════════════════════════════════════════════
+       MODAL PRODUCTO (Editar / Nuevo)
+       ═══════════════════════════════════════════════════ -->
+  <div class="modal-overlay" id="modalProducto" style="display:none;">
+    <div class="modal-box">
+      <div class="modal-header">
+        <span class="modal-title" id="modalProductoTitle">Editar Producto</span>
+        <button class="modal-close" id="modalProductoClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-field">
+          <label class="modal-label">NOMBRE *</label>
+          <input type="text" class="modal-input" id="editNombre" placeholder="Nombre del producto">
+        </div>
+        <div class="modal-row">
+          <div class="modal-field">
+            <label class="modal-label">PRECIO (€) *</label>
+            <input type="number" class="modal-input" id="editPrecio" step="0.01" min="0">
+          </div>
+          <div class="modal-field">
+            <label class="modal-label">COSTE (€) · solo lectura</label>
+            <input type="number" class="modal-input" id="editCoste" step="0.01" min="0" placeholder="Cargando…" readonly>
+            <div style="font-size:10px;color:var(--text-dim);margin-top:4px;">El coste se gestiona desde Almacén.</div>
+          </div>
+        </div>
+
+        <!-- v3.9.0: OFERTA — descuento en % o en €, como el panel de Wix -->
+        <div class="modal-row">
+          <div class="modal-field">
+            <label class="modal-label">DESCUENTO</label>
+            <div class="promo-desc-wrap">
+              <input type="number" class="modal-input" id="editPromoValor" step="0.01" min="0" placeholder="0">
+              <button type="button" class="promo-unit" id="btnPromoPct" title="Descuento en porcentaje">%</button>
+              <button type="button" class="promo-unit promo-unit-on" id="btnPromoEur" title="Descuento en euros">€</button>
+            </div>
+            <span class="modal-hint" id="promoHint">El precio de arriba se conserva y sale tachado.</span>
+          </div>
+          <div class="modal-field">
+            <label class="modal-label">PRECIO DE OFERTA (€)</label>
+            <input type="number" class="modal-input" id="editPromoPrecio" step="0.01" min="0" placeholder="—">
+            <div class="toggle-wrap">
+              <button type="button" class="btn-modal-save" id="btnActivarPromo">🏷 ACTIVAR</button>
+              <button type="button" class="btn-modal-cancel" id="btnQuitarPromo">QUITAR</button>
+            </div>
+            <span class="modal-hint">Se aplica al pulsar, sin esperar a GUARDAR.</span>
+          </div>
+        </div>
+
+        <!-- v3.1: STOCK + SEGUIMIENTO + DISPONIBILIDAD -->
+        <div class="modal-row">
+          <div class="modal-field">
+            <label class="modal-label">STOCK (UNIDADES)</label>
+            <input type="number" class="modal-input" id="editStock" step="1" min="0" placeholder="—">
+            <span class="modal-hint" id="stockHint"></span>
+          </div>
+          <div class="modal-field">
+            <label class="modal-label">SEGUIMIENTO STOCK</label>
+            <div class="toggle-wrap">
+              <label><input type="checkbox" id="editTrackInventory"> Activar contador</label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-row">
+          <div class="modal-field">
+            <label class="modal-label">DISPONIBILIDAD</label>
+            <div class="toggle-wrap">
+              <label><input type="checkbox" id="editVisible" checked> Disponible en tienda</label>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-row">
+          <div class="modal-field">
+            <label class="modal-label">SKU</label>
+            <input type="text" class="modal-input" id="editSku" placeholder="Código SKU">
+          </div>
+          <div class="modal-field">
+            <label class="modal-label">MARCA</label>
+            <input type="text" class="modal-input" id="editMarca" placeholder="Marca">
+          </div>
+        </div>
+        <div class="modal-field">
+          <label class="modal-label">DESCRIPCIÓN (texto largo)</label>
+          <textarea class="modal-textarea" id="editDescripcion" rows="3" placeholder="Descripción del producto..."></textarea>
+          <span class="modal-hint">Usa máx. 75-100 palabras y tono comercial.</span>
+        </div>
+        <div class="modal-field">
+          <label class="modal-label">RIBBON (ETIQUETA)</label>
+          <input type="text" class="modal-input" id="editRibbon" placeholder="Ej: Nuevo, Oferta...">
+        </div>
+
+        <!-- ═══ INFORMACIÓN ADICIONAL ═══ -->
+        <hr class="modal-section-sep">
+        <div class="modal-section-title">📋 Información adicional</div>
+        <div class="modal-field">
+          <label class="modal-label">DESCRIPCIÓN CORTA</label>
+          <div class="rt-toolbar" data-rt-for="editDescCorta">
+            <button type="button" class="rt-btn" data-rt-cmd="bold" title="Negrita">B</button>
+            <button type="button" class="rt-btn rt-btn-i" data-rt-cmd="italic" title="Cursiva">I</button>
+            <button type="button" class="rt-btn rt-btn-u" data-rt-cmd="underline" title="Subrayado">U</button>
+            <button type="button" class="rt-btn" data-rt-cmd="insertUnorderedList" title="Lista de viñetas">•</button>
+          </div>
+          <div class="rt-editor" id="editDescCorta" contenteditable="true" data-placeholder="Resumen breve del producto, para quién es y qué resultado ofrece..."></div>
+          <span class="modal-hint">Máximo 35-40 palabras y tono más técnico.</span>
+        </div>
+        <div class="modal-field">
+          <label class="modal-label">COMPONENTES</label>
+          <div class="rt-toolbar" data-rt-for="editComponentes">
+            <button type="button" class="rt-btn" data-rt-cmd="bold" title="Negrita">B</button>
+            <button type="button" class="rt-btn rt-btn-i" data-rt-cmd="italic" title="Cursiva">I</button>
+            <button type="button" class="rt-btn rt-btn-u" data-rt-cmd="underline" title="Subrayado">U</button>
+            <button type="button" class="rt-btn" data-rt-cmd="insertUnorderedList" title="Lista de viñetas">•</button>
+          </div>
+          <div class="rt-editor" id="editComponentes" contenteditable="true" data-placeholder="Ingredientes activos, uno por línea o en viñetas..."></div>
+        </div>
+        <div class="modal-field">
+          <label class="modal-label">USOS RECOMENDADOS DEL PRODUCTO</label>
+          <div class="rt-toolbar" data-rt-for="editUsos">
+            <button type="button" class="rt-btn" data-rt-cmd="bold" title="Negrita">B</button>
+            <button type="button" class="rt-btn rt-btn-i" data-rt-cmd="italic" title="Cursiva">I</button>
+            <button type="button" class="rt-btn rt-btn-u" data-rt-cmd="underline" title="Subrayado">U</button>
+            <button type="button" class="rt-btn" data-rt-cmd="insertUnorderedList" title="Lista de viñetas">•</button>
+          </div>
+          <div class="rt-editor" id="editUsos" contenteditable="true" data-placeholder="Instrucciones de aplicación..."></div>
+        </div>
+        <div class="modal-field">
+          <label class="modal-label">VENTAJAS DEL PRODUCTO</label>
+          <div class="rt-toolbar" data-rt-for="editVentajas">
+            <button type="button" class="rt-btn" data-rt-cmd="bold" title="Negrita">B</button>
+            <button type="button" class="rt-btn rt-btn-i" data-rt-cmd="italic" title="Cursiva">I</button>
+            <button type="button" class="rt-btn rt-btn-u" data-rt-cmd="underline" title="Subrayado">U</button>
+            <button type="button" class="rt-btn" data-rt-cmd="insertUnorderedList" title="Lista de viñetas">•</button>
+          </div>
+          <div class="rt-editor" id="editVentajas" contenteditable="true" data-placeholder="Beneficios y ventajas del producto..."></div>
+        </div>
+        <hr class="modal-section-sep">
+
+        <!-- Galería multi-imagen -->
+        <div class="modal-field">
+          <label class="modal-label">IMÁGENES</label>
+          <div class="img-gallery" id="imgGallery">
+            <span class="img-gallery-empty">Sin imágenes</span>
+          </div>
+          <button type="button" class="btn-add-images" id="btnAddImages">📷 + Añadir fotos</button>
+          <input type="file" id="imgFileInput" accept="image/*" multiple style="display:none;">
+        </div>
+        <div class="modal-field">
+          <label class="modal-label">CATEGORÍAS</label>
+          <div class="cat-guia">
+            Marca <b>tres</b> categorías en cada producto:<br>
+            1 · <b>Todos los productos</b>, para que salga en el listado general.<br>
+            2 · Una de <b>tipo de producto</b> (champú, mascarilla, plancha…).<br>
+            3 · Una con el <b>nombre de la marca</b> (TRUSS, K18, Davines…).<br>
+            La tienda filtra por categoría, no por el campo Marca. Si falta
+            alguna, el producto no aparece al filtrar.
+            <span class="cat-guia-aviso">
+              ⚠️ Si creas una categoría nueva, avisa a KAMISUITE: hay que darla
+              de alta en los filtros de la tienda pública o no se verá ahí.
+            </span>
+          </div>
+          <button type="button" class="btn-tipos" id="btnVerTipos">📖 Categorías según tipos de producto sugeridas</button>
+          <div class="tipos-panel" id="tiposPanel"></div>
+          <div class="cat-checkboxes" id="editCategorias">
+            <span style="color:var(--muted);font-size:10px;">Cargando...</span>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button class="btn-delete-product" id="btnEliminarProducto" style="display:none;">🗑️ ELIMINAR</button>
+        <div style="flex:1;"></div>
+        <button class="btn-modal-cancel" id="btnCancelarProducto">CANCELAR</button>
+        <button class="btn-modal-save" id="btnGuardarProducto">💾 GUARDAR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CATEGORÍA NUEVA -->
+  <div class="modal-overlay" id="modalCategoria" style="display:none;">
+    <div class="modal-box modal-box-sm">
+      <div class="modal-header">
+        <span class="modal-title">📂 Nueva Categoría</span>
+        <button class="modal-close" id="modalCategoriaClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-field">
+          <label class="modal-label">NOMBRE DE LA CATEGORÍA *</label>
+          <input type="text" class="modal-input" id="inputNuevaCategoria" placeholder="Ej: Champús, Mascarillas...">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <div style="flex:1;"></div>
+        <button class="btn-modal-cancel" id="btnCancelarCategoria">CANCELAR</button>
+        <button class="btn-modal-save" id="btnCrearCategoria">✓ CREAR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- MODAL CONFIRMACIÓN ELIMINAR -->
+  <div class="modal-overlay" id="modalConfirmDelete" style="display:none;">
+    <div class="modal-box modal-box-sm">
+      <div class="modal-header">
+        <span class="modal-title" style="color:var(--red);">⚠️ Eliminar Producto</span>
+      </div>
+      <div class="modal-body">
+        <p style="color:var(--text-secondary);font-size:12px;margin-bottom:8px;" id="deleteProductName"></p>
+        <p style="color:var(--muted);font-size:11px;margin-bottom:10px;">
+          Esta acción no se puede deshacer. Escribe <strong style="color:var(--red);">ELIMINAR</strong> para confirmar.
+        </p>
+        <input type="text" class="modal-input" id="inputConfirmDelete" placeholder="Escribe ELIMINAR...">
+      </div>
+      <div class="modal-footer">
+        <div style="flex:1;"></div>
+        <button class="btn-modal-cancel" id="btnCancelarDelete">CANCELAR</button>
+        <button class="btn-delete-confirm" id="btnConfirmDelete" disabled>🗑️ ELIMINAR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- v3.0: MODAL CONFIRMAR DESCUENTO DE 1 UNIDAD -->
+  <div class="modal-overlay" id="modalConfirmDescuento" style="display:none;">
+    <div class="modal-box modal-box-sm">
+      <div class="modal-header">
+        <span class="modal-title">🗑️ Descontar unidad</span>
+        <button class="modal-close" id="modalDescuentoClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="color:var(--text-secondary);font-size:13px;line-height:1.4;" id="descuentoTexto"></p>
+        <p style="color:var(--muted);font-size:11px;margin-top:6px;">Esta acción resta <strong style="color:var(--accent);">1 unidad</strong> del stock del producto.</p>
+      </div>
+      <div class="modal-footer">
+        <div style="flex:1;"></div>
+        <button class="btn-modal-cancel" id="btnCancelarDescuento">CANCELAR</button>
+        <button class="btn-delete-confirm" id="btnConfirmarDescuento">CONFIRMAR</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- v3.7.1: AVISO DE CATEGORÍAS INCOMPLETAS -->
+  <div class="modal-overlay" id="modalCategoriasFaltan" style="display:none;">
+    <div class="modal-box modal-box-sm">
+      <div class="modal-header">
+        <span class="modal-title" style="color:var(--yellow);">⚠️ Faltan categorías</span>
+        <button class="modal-close" id="modalCatFaltanClose">✕</button>
+      </div>
+      <div class="modal-body">
+        <p style="color:var(--text-secondary);font-size:13px;line-height:1.5;">
+          Este producto no tiene marcadas las <strong style="color:var(--text);">dos categorías</strong>
+          que necesita para aparecer en los filtros de la tienda.
+        </p>
+        <p style="color:var(--text-secondary);font-size:12px;line-height:1.6;margin-top:8px;">
+          1 · Una de <strong style="color:var(--accent);">tipo de producto</strong> — champú, mascarilla, plancha…<br>
+          2 · Una con el <strong style="color:var(--accent);">nombre de la marca</strong> — TRUSS, K18, Davines…
+        </p>
+        <p style="color:var(--muted);font-size:11px;line-height:1.5;margin-top:8px;">
+          La tienda filtra por categoría, no por el campo Marca. Si guardas así, el
+          producto se venderá igual, pero no aparecerá cuando un cliente filtre por
+          tipo o por marca.
+        </p>
+      </div>
+      <div class="modal-footer">
+        <div style="flex:1;"></div>
+        <button class="btn-modal-cancel" id="btnGuardarIgualmente">GUARDAR IGUALMENTE</button>
+        <button class="btn-modal-save" id="btnElegirCategorias">ELEGIR CATEGORÍAS</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- TOAST -->
+  <div class="toast" id="toast"></div>
+
+<script>
+  // ═══════════════════════════════════════════════════
+  // STATE
+  // ═══════════════════════════════════════════════════
+  let allProductos = [];
+  let allCollections = [];
+
+  // Estado edición multi-imagen
+  let modalMode = null;       // 'edit' | 'new'
+  let editingProductId = null;
+  let currentMediaItems = []; // [{src, type}] del producto actual
+  let imagesToRemove = [];    // srcs marcados para eliminar
+  let imagesToAdd = [];       // [{base64, fileName}] nuevas
+
+  // v3.0: pending decrement target
+  let pendingDecrementProductId = null;
+
+  const el = {
+    toolbar: document.getElementById('toolbar'),
+    content: document.getElementById('content'),
+    footer: document.getElementById('footer'),
+    search: document.getElementById('searchBox'),
+    filterCol: document.getElementById('filterCollection'),
+    filterVis: document.getElementById('filterVisibility'),
+    counter: document.getElementById('counter'),
+    toast: document.getElementById('toast')
+  };
+
+  // ═══════════════════════════════════════════════════
+  // RENDER LISTADO
+  // ═══════════════════════════════════════════════════
+  function render(data) {
+    allProductos = data.productos || [];
+    allCollections = data.collections || [];
+
+    if (allCollections.length > 0) {
+      // v3.4.0: conservar la categoría seleccionada al refrescar.
+      // render() se llama en cada recarga del listado (también tras
+      // guardar un producto). Al reescribir el innerHTML del
+      // desplegable se perdía la selección y el listado volvía a
+      // "Todas las categorías".
+      const categoriaSeleccionada = el.filterCol.value;
+
+      el.filterCol.innerHTML = '<option value="">Todas las categorías</option>';
+      allCollections.sort((a, b) => a.name.localeCompare(b.name));
+      allCollections.forEach(c => {
+        el.filterCol.innerHTML += `<option value="${esc(c.id)}">${esc(c.name)}</option>`;
+      });
+
+      // Restaurar solo si esa categoría sigue existiendo. Si se
+      // eliminó, el desplegable queda en "Todas las categorías".
+      if (categoriaSeleccionada && allCollections.some(c => c.id === categoriaSeleccionada)) {
+        el.filterCol.value = categoriaSeleccionada;
+      }
+
+      el.filterCol.style.display = '';
+    }
+
+    el.toolbar.style.display = 'flex';
+    applyFilters();
+    renderFooter();
+  }
+
+  function applyFilters() {
+    const q = (el.search.value || '').toLowerCase().trim();
+    const colF = el.filterCol.value;
+    const visF = el.filterVis.value;  // '', 'visible', 'hidden'
+
+    const filtered = allProductos.filter(p => {
+      if (q && !p.name.toLowerCase().includes(q) && !(p.sku || '').toLowerCase().includes(q)) return false;
+      if (colF) {
+        const inCol = (p.collections || []).some(c => c.id === colF);
+        if (!inCol) return false;
+      }
+      // v3.2.0: filtro robusto. Con backend v1.2.3, visible llega
+      // true/false para los 231 productos (doble query A). Defensa
+      // ante null (si la query de visibilidad fallara): un producto
+      // con visible:null NO se oculta en "Solo OCULTOS" — se trata
+      // como desconocido y se muestra, en vez de desaparecer de los
+      // dos filtros como pasaba antes.
+      if (visF === 'visible' && p.visible === false) return false;
+      if (visF === 'hidden' && p.visible !== false) return false;
+      return true;
+    });
+
+    filtered.sort((a, b) => {
+      if (a.visible !== b.visible) return a.visible === false ? 1 : -1;
+      if (a.inStock !== b.inStock) return a.inStock ? -1 : 1;
+      return a.name.localeCompare(b.name);
+    });
+
+    el.counter.innerHTML = `<strong>${filtered.length}</strong> de ${allProductos.length} productos`;
+
+    if (filtered.length === 0) {
+      el.content.innerHTML = '<div class="empty-state">Sin resultados</div>';
+      return;
+    }
+
+    let html = '<div class="products">';
+    filtered.forEach(p => { html += buildProductCard(p); });
+    html += '</div>';
+    el.content.innerHTML = html;
+    bindCardEvents();
+  }
+
+  function convertWixImageUrl(wixUrl) {
+    if (!wixUrl) return '';
+    if (!wixUrl.startsWith('wix:image://')) return wixUrl;
+    try {
+      const match = wixUrl.match(/wix:image:\/\/v1\/([^\/]+)/);
+      if (match && match[1]) return 'https://static.wixstatic.com/media/' + match[1];
+    } catch (e) {}
+    return '';
+  }
+
+  // v3.0: build stock line in card
+  function buildStockHTML(p) {
+    if (p.trackInventory === false) {
+      return '<div class="prod-stock stock-untracked">Sin seguimiento de stock</div>';
+    }
+    const q = p.quantityInStock;
+    if (q === null || q === undefined) {
+      return '<div class="prod-stock stock-untracked">— sin dato</div>';
+    }
+    let cls = 'stock-ok';
+    if (q === 0) cls = 'stock-zero';
+    else if (q <= 3) cls = 'stock-low';
+    return `<div class="prod-stock ${cls}">
+      <span>Stock:</span>
+      <span class="prod-stock-num">${q}</span>
+    </div>`;
+  }
+
+  function buildProductCard(p) {
+    const visCls = (p.visible === false) ? ' not-visible' : '';
+
+    let imgHTML = '';
+    const imgUrl = convertWixImageUrl(p.mainMedia);
+    if (imgUrl) {
+      imgHTML = `<img class="prod-img" src="${esc(imgUrl)}" alt="${esc(p.name)}" loading="lazy">`;
+    } else {
+      imgHTML = '<span class="prod-img-placeholder">📦</span>';
+    }
+
+    let ribbonHTML = p.ribbon ? `<span class="ribbon-chip">${esc(p.ribbon)}</span>` : '';
+    const hiddenText = p.visible === false ? 'OCULTO' : '';
+    const priceDisplay = p.formattedPrice || (p.price !== null && p.price !== undefined ? Number(p.price).toFixed(2) + ' €' : '—');
+
+    // v3.8.0: con oferta activa, el precio anterior va tachado delante
+    // del promocional y se añade el porcentaje de rebaja. Sin oferta,
+    // la línea queda exactamente igual que en v3.7.1.
+    const promoActiva = p.enPromocion === true;
+    const promoDisplay = promoActiva
+      ? (p.formattedDiscountedPrice || (Number(p.discountedPrice).toFixed(2) + ' €'))
+      : '';
+    const promoPct = promoActiva ? pctProducto(p) : 0;
+    const precioHTML = promoActiva
+      ? `<span class="prod-price-old">${esc(priceDisplay)}</span><span class="prod-price">${esc(promoDisplay)}</span>${promoPct > 0 ? `<span class="promo-chip">-${pctTexto(promoPct)}%</span>` : ''}`
+      : `<span class="prod-price">${priceDisplay}</span>`;
+
+    // v3.0: solo se puede descontar si trackInventory=true y stock > 0
+    const stockNum = (p.trackInventory && typeof p.quantityInStock === 'number') ? p.quantityInStock : null;
+    const canDecrement = stockNum !== null && stockNum > 0;
+
+    const mediaCount = (p.mediaItems || []).length;
+    const mediaChip = mediaCount > 1 ? `<span class="media-count-chip">📷 ${mediaCount}</span>` : '';
+
+    return `
+      <div class="prod-card${visCls}" data-id="${p.id}">
+        <div class="prod-img-wrap">
+          ${imgHTML}
+          ${ribbonHTML}
+          ${mediaChip}
+          ${hiddenText ? `<span class="hidden-chip">${hiddenText}</span>` : ''}
+        </div>
+        <div class="prod-body">
+          <div class="prod-name">${esc(p.name)}</div>
+          ${(p.collections || []).length > 0
+            ? '<div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:4px;">' +
+              (p.collections || []).map(c =>
+                `<span style="font-size:8px;font-weight:700;letter-spacing:.5px;text-transform:uppercase;padding:2px 6px;border-radius:3px;background:var(--accent-dim);color:var(--accent);">${esc(c.name)}</span>`
+              ).join('') + '</div>'
+            : ''}
+          ${p.sku ? `<div class="prod-sku">SKU: ${esc(p.sku)}</div>` : ''}
+          <div class="prod-price-row">
+            <span>${precioHTML}</span>
+            <span class="prod-type">${esc(p.productType)}</span>
+          </div>
+          ${buildStockHTML(p)}
+        </div>
+        <div class="prod-action" id="action-${p.id}">
+          <button class="btn-edit" data-id="${p.id}" title="Editar producto">✏️</button>
+          <button class="btn-dup" data-dup-id="${p.id}" title="Duplicar producto (para otro tamaño)">⧉</button>
+          <button class="btn-decrement" data-id="${p.id}" data-name="${esc(p.name)}" ${canDecrement ? '' : 'disabled'} title="${canDecrement ? 'Descontar 1 unidad' : 'No se puede descontar (sin stock o sin seguimiento)'}">
+            🗑️ DESCONTAR
+          </button>
+        </div>
+      </div>
+    `;
+  }
+
+  // ══════════════════════════════════════════════════
+  // v3.8.0 — PRECIO PROMOCIONAL
+  // ══════════════════════════════════════════════════
+  // El precio de la oferta se escribe en Wix como una rebaja sobre el
+  // precio original, que no se toca. Por eso QUITAR no necesita saber
+  // el precio de antes: Wix lo conserva.
+  // v3.9.0: unidad activa del descuento. 'AMOUNT' (euros) o 'PERCENT'.
+  let promoTipo = 'AMOUNT';
+
+  function precioBaseFicha() {
+    const base = parseFloat(document.getElementById('editPrecio').value);
+    return isFinite(base) && base > 0 ? base : 0;
+  }
+
+  function cambiarUnidadPromo(tipo) {
+    promoTipo = tipo;
+    document.getElementById('btnPromoPct').classList.toggle('promo-unit-on', tipo === 'PERCENT');
+    document.getElementById('btnPromoEur').classList.toggle('promo-unit-on', tipo === 'AMOUNT');
+    // Al cambiar de unidad se conserva el PRECIO DE OFERTA y se
+    // recalcula el descuento: es lo que el salón tiene en la cabeza.
+    recalcularDesdePrecioOferta();
+  }
+
+  // Descuento → precio de oferta.
+  function recalcularDesdeDescuento() {
+    const base = precioBaseFicha();
+    const valor = parseFloat(document.getElementById('editPromoValor').value);
+    const campoPrecio = document.getElementById('editPromoPrecio');
+    if (!base || !isFinite(valor) || valor <= 0) { campoPrecio.value = ''; return; }
+    const promo = (promoTipo === 'PERCENT') ? base * (1 - valor / 100) : base - valor;
+    campoPrecio.value = promo > 0 ? promo.toFixed(2) : '';
+  }
+
+  // Precio de oferta → descuento.
+  function recalcularDesdePrecioOferta() {
+    const base = precioBaseFicha();
+    const promo = parseFloat(document.getElementById('editPromoPrecio').value);
+    const campoValor = document.getElementById('editPromoValor');
+    if (!base || !isFinite(promo) || promo <= 0 || promo >= base) { campoValor.value = ''; return; }
+    const valor = (promoTipo === 'PERCENT') ? (1 - promo / base) * 100 : base - promo;
+    campoValor.value = valor.toFixed(2);
+  }
+
+  // El precio original nunca se toca: Wix lo conserva. Por eso QUITAR no
+  // necesita saber el precio de antes.
+  function pintarEstadoPromo(prod) {
+    const campoValor = document.getElementById('editPromoValor');
+    const campoPrecio = document.getElementById('editPromoPrecio');
+    const hint = document.getElementById('promoHint');
+    const btnOn = document.getElementById('btnActivarPromo');
+    const btnOff = document.getElementById('btnQuitarPromo');
+    const btnPct = document.getElementById('btnPromoPct');
+    const btnEur = document.getElementById('btnPromoEur');
+    if (!campoValor || !campoPrecio || !hint || !btnOn || !btnOff) return;
+
+    // v3.10.0: los botones reflejan si el producto YA está de oferta.
+    const yaEnOferta = !!(prod && prod.enPromocion === true);
+    btnOn.disabled = false;
+    btnOn.textContent = yaEnOferta ? '🏷 ACTUALIZAR' : '🏷 ACTIVAR';
+    btnOff.disabled = !yaEnOferta;
+    btnOff.textContent = 'QUITAR';
+
+    if (!prod) {
+      campoValor.value = '';
+      campoPrecio.value = '';
+      campoValor.disabled = true;
+      campoPrecio.disabled = true;
+      btnPct.disabled = true;
+      btnEur.disabled = true;
+      btnOn.disabled = true;
+      btnOff.disabled = true;
+      hint.textContent = 'Disponible al guardar el producto y volver a abrir su ficha.';
+      return;
+    }
+
+    campoValor.disabled = false;
+    campoPrecio.disabled = false;
+    btnPct.disabled = false;
+    btnEur.disabled = false;
+
+    // Tipo REAL guardado en Wix. Si la oferta se puso desde el panel de
+    // Wix en porcentaje, la ficha abre en porcentaje.
+    const guardado = prod.discount || null;
+    const tipoGuardado = guardado && guardado.type ? String(guardado.type).toUpperCase() : '';
+    promoTipo = (tipoGuardado === 'PERCENT') ? 'PERCENT' : 'AMOUNT';
+    btnPct.classList.toggle('promo-unit-on', promoTipo === 'PERCENT');
+    btnEur.classList.toggle('promo-unit-on', promoTipo === 'AMOUNT');
+
+    if (prod.enPromocion === true) {
+      campoValor.value = (guardado && isFinite(Number(guardado.value)))
+        ? Number(guardado.value).toFixed(2)
+        : '';
+      campoPrecio.value = (prod.discountedPrice !== null && prod.discountedPrice !== undefined)
+        ? Number(prod.discountedPrice).toFixed(2)
+        : '';
+      if (!campoValor.value) recalcularDesdePrecioOferta();
+      const pct = pctProducto(prod);
+      hint.textContent = pct > 0
+        ? `En oferta: -${pctTexto(pct)}% sobre ${Number(prod.price).toFixed(2)} €.`
+        : 'En oferta.';
+    } else {
+      campoValor.value = '';
+      campoPrecio.value = '';
+      hint.textContent = 'El precio de arriba se conserva y sale tachado.';
+    }
+  }
+
+  function activarPromocion() {
+    if (modalMode !== 'edit' || !editingProductId) {
+      showToast('⚠️ Guarda el producto antes de ponerle oferta', true);
+      return;
+    }
+    const valor = parseFloat(document.getElementById('editPromoValor').value);
+    if (!isFinite(valor) || valor <= 0) {
+      showToast('⚠️ Escribe el descuento', true);
+      return;
+    }
+    if (promoTipo === 'PERCENT' && valor >= 100) {
+      showToast('⚠️ El porcentaje debe ser menor que 100', true);
+      return;
+    }
+    const base = precioBaseFicha();
+    if (promoTipo === 'AMOUNT' && base && valor >= base) {
+      showToast('⚠️ La rebaja debe ser menor que el precio', true);
+      return;
+    }
+
+    const btnOn = document.getElementById('btnActivarPromo');
+    btnOn.disabled = true;
+    btnOn.textContent = 'APLICANDO…';
+
+    parent.postMessage({
+      type: 'activar-promocion',
+      payload: { productId: editingProductId, tipo: promoTipo, valor: valor }
+    }, '*');
+  }
+
+  function quitarPromocion() {
+    if (modalMode !== 'edit' || !editingProductId) return;
+
+    const btnOff = document.getElementById('btnQuitarPromo');
+    btnOff.disabled = true;
+    btnOff.textContent = 'QUITANDO…';
+
+    parent.postMessage({
+      type: 'quitar-promocion',
+      payload: { productId: editingProductId }
+    }, '*');
+  }
+
+  // v3.10.0: el porcentaje lo resuelve el backend (v1.4.3) a partir del
+  // descuento guardado en Wix, así que aquí solo se lee. El cálculo local
+  // queda como red de seguridad para un listado antiguo sin el campo.
+  function pctProducto(p) {
+    if (p && isFinite(Number(p.descuentoPct)) && Number(p.descuentoPct) > 0) {
+      return Number(p.descuentoPct);
+    }
+    return calcularPct(p ? p.price : 0, p ? p.discountedPrice : 0);
+  }
+
+  // Coma decimal, que un -12.5% en español chirría.
+  function pctTexto(pct) {
+    return String(pct).replace('.', ',');
+  }
+
+  // Respaldo. Trunca —nunca prometer más rebaja de la que hay— con
+  // tolerancia para el error de coma flotante: 12,15/13,50 da
+  // 9,999999999999998 y sin ella se quedaría en 9.
+  function calcularPct(precio, precioDescontado) {
+    const base = Number(precio);
+    const promo = Number(precioDescontado);
+    if (!isFinite(base) || !isFinite(promo) || base <= 0 || promo <= 0 || promo >= base) return 0;
+    // La tolerancia evita que 12,15/13,50 (que en coma flotante da
+    // 9,999999999999998) se quede en 9 al redondear hacia abajo.
+    return Math.floor(((1 - (promo / base)) * 100) + 1e-9);
+  }
+
+  function bindCardEvents() {
+    el.content.querySelectorAll('.btn-edit').forEach(btn => {
+      btn.addEventListener('click', () => {
+        openEditModal(btn.dataset.id);
+      });
+    });
+
+    // v3.7.0: DUPLICAR
+    el.content.querySelectorAll('.btn-dup').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.classList.contains('busy')) return;
+        btn.classList.add('busy');
+        showToast('⧉ Duplicando producto…');
+        parent.postMessage({ type: 'duplicarProducto', payload: { productId: btn.dataset.dupId } }, '*');
+      });
+    });
+
+    // v3.0: DESCONTAR con confirmación previa
+    el.content.querySelectorAll('.btn-decrement').forEach(btn => {
+      btn.addEventListener('click', () => {
+        if (btn.disabled) return;
+        const id = btn.dataset.id;
+        const name = btn.dataset.name || '';
+        openConfirmDescuento(id, name);
+      });
+    });
+  }
+
+  function renderFooter() {
+    const total = allProductos.length;
+    const visible = allProductos.filter(p => p.visible === true).length;
+    const hidden = allProductos.filter(p => p.visible === false).length;
+    el.footer.style.display = 'flex';
+    el.footer.innerHTML = `
+      <span class="footer-item">Total: <strong>${total}</strong></span>
+      <span class="footer-item">Visibles: <strong>${visible}</strong></span>
+      <span class="footer-item">Ocultos: <strong>${hidden}</strong></span>
+      <span class="footer-item">Categorías: <strong>${allCollections.length}</strong></span>
+    `;
+  }
+
+  // ═══════════════════════════════════════════════════
+  // TOAST
+  // ═══════════════════════════════════════════════════
+  let toastTimer;
+  function showToast(msg, isError, actionHtml) {
+    clearTimeout(toastTimer);
+    el.toast.innerHTML = msg + (actionHtml || '');
+    el.toast.className = 'toast show' + (isError ? ' toast-error' : '');
+    toastTimer = setTimeout(() => { el.toast.className = 'toast'; }, actionHtml ? 8000 : 2500);
+  }
+
+  function esc(str) {
+    const d = document.createElement('div');
+    d.textContent = str;
+    return d.innerHTML;
+  }
+
+  function stripHtml(html) {
+    const tmp = document.createElement('div');
+    tmp.innerHTML = html;
+    return tmp.textContent || tmp.innerText || '';
+  }
+
+  // ═══════════════════════════════════════════════════
+  // FILTER EVENTS
+  // ═══════════════════════════════════════════════════
+  el.search.addEventListener('input', applyFilters);
+  el.filterCol.addEventListener('change', applyFilters);
+  el.filterVis.addEventListener('change', applyFilters);
+
+  // v3.1: toggle Seguimiento de stock → habilita/deshabilita input
+  document.getElementById('editTrackInventory').addEventListener('change', (e) => {
+    const on = e.target.checked;
+    const stockInput = document.getElementById('editStock');
+    const stockHint = document.getElementById('stockHint');
+    if (on) {
+      stockInput.disabled = false;
+      stockInput.placeholder = '0';
+      stockHint.textContent = 'Escribe la cantidad total y guarda.';
+    } else {
+      stockInput.disabled = true;
+      stockInput.value = '';
+      stockInput.placeholder = '— sin seguimiento';
+      stockHint.textContent = 'Activa el seguimiento para poder gestionar unidades.';
+    }
+  });
+
+  // ═══════════════════════════════════════════════════
+  // MODALES — bindings
+  // ═══════════════════════════════════════════════════
+
+  document.getElementById('btnNuevoProducto').addEventListener('click', openNewProductModal);
+  document.getElementById('btnNuevaCategoria').addEventListener('click', openNewCategoryModal);
+
+  document.getElementById('modalProductoClose').addEventListener('click', closeProductModal);
+  document.getElementById('btnCancelarProducto').addEventListener('click', closeProductModal);
+  document.getElementById('btnGuardarProducto').addEventListener('click', saveProduct);
+  // v3.8.0: la oferta se aplica al pulsar, no al guardar.
+  document.getElementById('btnActivarPromo').addEventListener('click', activarPromocion);
+  document.getElementById('btnQuitarPromo').addEventListener('click', quitarPromocion);
+  // v3.9.0: selector de unidad y campos enlazados.
+  document.getElementById('btnPromoPct').addEventListener('click', () => cambiarUnidadPromo('PERCENT'));
+  document.getElementById('btnPromoEur').addEventListener('click', () => cambiarUnidadPromo('AMOUNT'));
+  document.getElementById('editPromoValor').addEventListener('input', recalcularDesdeDescuento);
+  document.getElementById('editPromoPrecio').addEventListener('input', recalcularDesdePrecioOferta);
+  document.getElementById('editPrecio').addEventListener('input', recalcularDesdeDescuento);
+
+  // v3.7.1: ventana de categorías incompletas
+  function cerrarAvisoCategorias() {
+    document.getElementById('modalCategoriasFaltan').style.display = 'none';
+  }
+  document.getElementById('modalCatFaltanClose').addEventListener('click', cerrarAvisoCategorias);
+  document.getElementById('btnElegirCategorias').addEventListener('click', () => {
+    cerrarAvisoCategorias();
+    const caja = document.getElementById('editCategorias');
+    if (caja) caja.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  });
+  document.getElementById('btnGuardarIgualmente').addEventListener('click', () => {
+    cerrarAvisoCategorias();
+    avisoCategoriasConfirmado = true;
+    saveProduct();
+  });
+  document.getElementById('btnEliminarProducto').addEventListener('click', startDeleteProduct);
+
+  document.getElementById('modalCategoriaClose').addEventListener('click', () => {
+    document.getElementById('modalCategoria').style.display = 'none';
+  });
+  document.getElementById('btnCancelarCategoria').addEventListener('click', () => {
+    document.getElementById('modalCategoria').style.display = 'none';
+  });
+  document.getElementById('btnCrearCategoria').addEventListener('click', createCategory);
+
+  document.getElementById('btnCancelarDelete').addEventListener('click', () => {
+    document.getElementById('modalConfirmDelete').style.display = 'none';
+  });
+  document.getElementById('inputConfirmDelete').addEventListener('input', (e) => {
+    document.getElementById('btnConfirmDelete').disabled = e.target.value.trim() !== 'ELIMINAR';
+  });
+  document.getElementById('btnConfirmDelete').addEventListener('click', confirmDeleteProduct);
+
+  // v3.0: bindings descuento
+  document.getElementById('modalDescuentoClose').addEventListener('click', closeConfirmDescuento);
+  document.getElementById('btnCancelarDescuento').addEventListener('click', closeConfirmDescuento);
+  document.getElementById('btnConfirmarDescuento').addEventListener('click', confirmarDescuento);
+
+  document.getElementById('btnAddImages').addEventListener('click', () => {
+    document.getElementById('imgFileInput').click();
+  });
+
+  document.getElementById('imgFileInput').addEventListener('change', (e) => {
+    const files = Array.from(e.target.files);
+    let pending = files.length;
+
+    files.forEach(file => {
+      if (file.size > 10 * 1024 * 1024) {
+        pending--;
+        showToast(`⚠️ ${file.name} demasiado grande (máx 10MB)`, true);
+        if (pending <= 0) renderImageGallery();
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = (ev) => {
+        imagesToAdd.push({ base64: ev.target.result, fileName: file.name });
+        pending--;
+        if (pending <= 0) renderImageGallery();
+      };
+      reader.readAsDataURL(file);
+    });
+    e.target.value = '';
+  });
+
+  // ═══════════════════════════════════════════════════
+  // v3.5.0 — EDITOR CON FORMATO (información adicional)
+  // ═══════════════════════════════════════════════════
+  // Los cuatro bloques de información adicional guardan HTML en
+  // Wix Stores (viñetas, negritas, saltos). Se editan con
+  // contenteditable para que el salón vea el texto maquetado y
+  // nunca las etiquetas.
+  //
+  // Etiquetas que se conservan al guardar. Cualquier otra se
+  // descarta conservando su texto, para no meter en el producto
+  // estilos ni marcado ajeno.
+  const RT_TAGS_OK = { 'UL':1, 'OL':1, 'LI':1, 'B':1, 'STRONG':1, 'I':1, 'EM':1, 'U':1, 'BR':1 };
+  const RT_IDS = ['editDescCorta', 'editComponentes', 'editUsos', 'editVentajas'];
+
+  function rtEscaparTexto(txt) {
+    return String(txt || '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  // Serializa el contenido del editor a HTML depurado.
+  function rtSerializar(node) {
+    let out = '';
+    node.childNodes.forEach(n => {
+      if (n.nodeType === 3) { out += rtEscaparTexto(n.nodeValue); return; }
+      if (n.nodeType !== 1) return;
+
+      const tag = n.tagName;
+      if (tag === 'BR') { out += '<br>'; return; }
+
+      if (RT_TAGS_OK[tag]) {
+        const t = tag.toLowerCase();
+        out += '<' + t + '>' + rtSerializar(n) + '</' + t + '>';
+        return;
+      }
+
+      // DIV y P: el navegador los genera al escribir. Se convierten
+      // en salto de línea para no ensuciar el producto.
+      const dentro = rtSerializar(n);
+      if (tag === 'DIV' || tag === 'P') {
+        out += dentro + (dentro && !/<br>$/i.test(dentro) ? '<br>' : '');
+      } else {
+        out += dentro;
+      }
+    });
+    return out;
+  }
+
+  // Lee un bloque. Devuelve '' si no hay texto real (evita guardar
+  // etiquetas sueltas de un bloque que el usuario ha vaciado).
+  function getRich(id) {
+    const ed = document.getElementById(id);
+    if (!ed) return '';
+    const texto = (ed.textContent || '').replace(/\u00a0/g, ' ').trim();
+    const tieneLista = !!ed.querySelector('li');
+    if (!texto && !tieneLista) return '';
+    return rtSerializar(ed).replace(/(<br>\s*)+$/i, '').trim();
+  }
+
+  // Escribe un bloque con el HTML que llega de Wix Stores.
+  function setRich(id, html) {
+    const ed = document.getElementById(id);
+    if (!ed) return;
+    ed.innerHTML = html || '';
+    // Si venía con etiquetas no permitidas, se normaliza ya al abrir
+    // para que lo que se ve sea exactamente lo que se guardará.
+    const limpio = rtSerializar(ed).replace(/(<br>\s*)+$/i, '').trim();
+    ed.innerHTML = limpio;
+  }
+
+  // Bindings de la barra de formato. Se hace en mousedown y con
+  // preventDefault para no perder la selección del texto al pulsar.
+  function initRichEditors() {
+    document.querySelectorAll('.rt-toolbar').forEach(bar => {
+      const destino = document.getElementById(bar.dataset.rtFor);
+      bar.querySelectorAll('.rt-btn').forEach(btn => {
+        btn.addEventListener('mousedown', (e) => {
+          e.preventDefault();
+          if (!destino) return;
+          destino.focus();
+          try { document.execCommand(btn.dataset.rtCmd, false, null); }
+          catch (err) { console.warn('rt cmd fail', btn.dataset.rtCmd, err); }
+        });
+      });
+    });
+
+    RT_IDS.forEach(id => {
+      const ed = document.getElementById(id);
+      if (!ed) return;
+
+      // Pegar SIEMPRE en limpio (sin formato de Word ni de una web).
+      ed.addEventListener('paste', (e) => {
+        e.preventDefault();
+        const cd = e.clipboardData || window.clipboardData;
+        const texto = cd ? cd.getData('text/plain') : '';
+        document.execCommand('insertText', false, texto);
+      });
+
+      // Intro = salto de línea. Dentro de una viñeta se deja el
+      // comportamiento nativo (crear la viñeta siguiente).
+      ed.addEventListener('keydown', (e) => {
+        if (e.key !== 'Enter' || e.shiftKey) return;
+        let n = window.getSelection && window.getSelection().anchorNode;
+        while (n && n !== ed) {
+          if (n.nodeType === 1 && n.tagName === 'LI') return;
+          n = n.parentNode;
+        }
+        e.preventDefault();
+        let ok = false;
+        try { ok = document.execCommand('insertLineBreak'); } catch (err) { ok = false; }
+        if (!ok) document.execCommand('insertHTML', false, '<br>');
+      });
+    });
+  }
+
+  initRichEditors();
+
+  // helper: encontrar sección en additionalInfoSections
+  function findSection(sections, title) {
+    const s = (sections || []).find(s => s.title === title);
+    return s ? s.description : '';
+  }
+
+  // ═══════════════════════════════════════════════════
+  // MODAL — EDITAR
+  // ═══════════════════════════════════════════════════
+  function openEditModal(productId) {
+    const prod = allProductos.find(p => p.id === productId);
+    if (!prod) return;
+
+    modalMode = 'edit';
+    editingProductId = productId;
+    currentMediaItems = prod.mediaItems || [];
+    imagesToRemove = [];
+    imagesToAdd = [];
+
+    document.getElementById('modalProductoTitle').textContent = '✏️ Editar: ' + prod.name;
+    document.getElementById('btnEliminarProducto').style.display = '';
+    document.getElementById('editNombre').value = prod.name || '';
+    document.getElementById('editPrecio').value = prod.price || '';
+
+    // v3.8.0: estado de la oferta de este producto.
+    pintarEstadoPromo(prod);
+
+    // v3.0.2: el coste ya viene en el listado masivo (backend
+    // v1.2.0 lo cruza desde storesProducts.queryProducts). Si es
+    // null, el producto no tiene coste configurado.
+    // v3.2.0: el listado masivo YA NO trae el coste (backend v1.2.3:
+    // queryProducts v2 no lo devolvía — todos los samples cost:null).
+    // El coste se pide ahora al backend al abrir el modal, vía
+    // 'obtener-coste'. Mientras llega, el campo queda vacío; el
+    // handler 'costeCargado' lo rellena cuando responde el backend.
+    const costeInput = document.getElementById('editCoste');
+    costeInput.value = '';
+    costeInput.placeholder = 'Cargando…';
+    parent.postMessage({
+      type: 'obtener-coste',
+      payload: { productId: productId }
+    }, '*');
+
+    document.getElementById('editSku').value = prod.sku || '';
+    document.getElementById('editMarca').value = prod.brand || '';
+    document.getElementById('editDescripcion').value = stripHtml(prod.description || '');
+    document.getElementById('editRibbon').value = prod.ribbon || '';
+    document.getElementById('editVisible').checked = prod.visible === true;
+
+    // v3.1: stock + seguimiento sincronizados
+    const stockInput = document.getElementById('editStock');
+    const stockHint = document.getElementById('stockHint');
+    const trackInput = document.getElementById('editTrackInventory');
+    trackInput.checked = prod.trackInventory === true;
+    if (prod.trackInventory === true) {
+      stockInput.disabled = false;
+      stockInput.value = (typeof prod.quantityInStock === 'number') ? prod.quantityInStock : '';
+      stockInput.placeholder = '0';
+      stockHint.textContent = 'Escribe la cantidad total y guarda.';
+    } else {
+      stockInput.disabled = true;
+      stockInput.value = '';
+      stockInput.placeholder = '— sin seguimiento';
+      stockHint.textContent = 'Activa el seguimiento para poder gestionar unidades.';
+    }
+
+    // additionalInfoSections
+    const sections = prod.additionalInfoSections || [];
+    // v3.5.0: el contenido llega como HTML y se pinta maquetado
+    setRich('editDescCorta',   findSection(sections, 'Descripción corta'));
+    setRich('editComponentes', findSection(sections, 'Componentes'));
+    setRich('editUsos',        findSection(sections, 'Usos recomendados del producto'));
+    setRich('editVentajas',    findSection(sections, 'Ventajas del producto'));
+
+    renderImageGallery();
+    populateCategoryCheckboxes(prod.collections || []);
+
+    document.getElementById('modalProducto').style.display = 'flex';
+    avisoCategoriasConfirmado = false;   // v3.6.0
+    const _tp = document.getElementById('tiposPanel');
+    if (_tp) _tp.classList.remove('open');
+    const _bt = document.getElementById('btnVerTipos');
+    if (_bt) _bt.textContent = '📖 Categorías según tipos de producto sugeridas';
+    document.getElementById('btnGuardarProducto').disabled = false;
+    document.getElementById('btnGuardarProducto').textContent = '💾 GUARDAR';
+  }
+
+  // ═══════════════════════════════════════════════════
+  // MODAL — NUEVO PRODUCTO
+  // ═══════════════════════════════════════════════════
+  function openNewProductModal() {
+    modalMode = 'new';
+    editingProductId = null;
+    currentMediaItems = [];
+    imagesToRemove = [];
+    imagesToAdd = [];
+
+    document.getElementById('modalProductoTitle').textContent = '➕ Nuevo Producto';
+    document.getElementById('btnEliminarProducto').style.display = 'none';
+    document.getElementById('editNombre').value = '';
+    document.getElementById('editPrecio').value = '';
+
+    // v3.8.0: en un alta todavía no hay productId al que colgar la
+    // oferta. Se pone después, abriendo la ficha del producto creado.
+    pintarEstadoPromo(null);
+
+    const costeInput = document.getElementById('editCoste');
+    costeInput.value = '';
+    costeInput.placeholder = '';
+
+    document.getElementById('editSku').value = '';
+    document.getElementById('editMarca').value = '';
+    document.getElementById('editDescripcion').value = '';
+    document.getElementById('editRibbon').value = '';
+    document.getElementById('editVisible').checked = true;
+
+    // v3.1: stock + seguimiento (por defecto activo para alta)
+    const stockInput = document.getElementById('editStock');
+    const stockHint = document.getElementById('stockHint');
+    const trackInput = document.getElementById('editTrackInventory');
+    trackInput.checked = true;
+    stockInput.disabled = false;
+    stockInput.value = '';
+    stockInput.placeholder = '0';
+    stockHint.textContent = 'Stock inicial. Déjalo vacío si no aplica.';
+
+    setRich('editDescCorta', '');
+    setRich('editComponentes', '');
+    setRich('editUsos', '');
+    setRich('editVentajas', '');
+
+    renderImageGallery();
+    populateCategoryCheckboxes([]);
+
+    document.getElementById('modalProducto').style.display = 'flex';
+    avisoCategoriasConfirmado = false;   // v3.6.0
+    const _tp = document.getElementById('tiposPanel');
+    if (_tp) _tp.classList.remove('open');
+    const _bt = document.getElementById('btnVerTipos');
+    if (_bt) _bt.textContent = '📖 Categorías según tipos de producto sugeridas';
+    document.getElementById('btnGuardarProducto').disabled = false;
+    document.getElementById('btnGuardarProducto').textContent = '💾 CREAR';
+    document.getElementById('editNombre').focus();
+  }
+
+  function closeProductModal() {
+    document.getElementById('modalProducto').style.display = 'none';
+    modalMode = null;
+    editingProductId = null;
+    currentMediaItems = [];
+    imagesToRemove = [];
+    imagesToAdd = [];
+  }
+
+  function openNewCategoryModal() {
+    document.getElementById('inputNuevaCategoria').value = '';
+    document.getElementById('modalCategoria').style.display = 'flex';
+    document.getElementById('btnCrearCategoria').disabled = false;
+    document.getElementById('btnCrearCategoria').textContent = '✓ CREAR';
+    document.getElementById('inputNuevaCategoria').focus();
+  }
+
+  // ═══════════════════════════════════════════════════
+  // GALERÍA MULTI-IMAGEN
+  // ═══════════════════════════════════════════════════
+  function renderImageGallery() {
+    const gallery = document.getElementById('imgGallery');
+    let html = '';
+
+    currentMediaItems.forEach((item, i) => {
+      const isMarked = imagesToRemove.includes(item.src);
+      const displayUrl = convertWixImageUrl(item.src);
+      if (displayUrl) {
+        html += `
+          <div class="img-thumb${isMarked ? ' marked' : ''}" data-idx="${i}">
+            <img src="${displayUrl}" loading="lazy">
+            <button class="img-thumb-x"
+              data-action="${isMarked ? 'restore' : 'remove'}"
+              data-src="${esc(item.src)}">${isMarked ? '↩' : '✕'}</button>
+          </div>
+        `;
+      }
+    });
+
+    imagesToAdd.forEach((item, i) => {
+      html += `
+        <div class="img-thumb new-img" data-newidx="${i}">
+          <img src="${item.base64}">
+          <button class="img-thumb-x" data-action="cancel" data-newidx="${i}">✕</button>
+        </div>
+      `;
+    });
+
+    if (!html) html = '<span class="img-gallery-empty">Sin imágenes</span>';
+    gallery.innerHTML = html;
+
+    gallery.querySelectorAll('.img-thumb-x').forEach(btn => {
+      btn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        const action = btn.dataset.action;
+        if (action === 'remove') {
+          imagesToRemove.push(btn.dataset.src);
+          renderImageGallery();
+        } else if (action === 'restore') {
+          imagesToRemove = imagesToRemove.filter(s => s !== btn.dataset.src);
+          renderImageGallery();
+        } else if (action === 'cancel') {
+          const idx = parseInt(btn.dataset.newidx);
+          imagesToAdd.splice(idx, 1);
+          renderImageGallery();
+        }
+      });
+    });
+  }
+
+  function populateCategoryCheckboxes(productCollections) {
+    const container = document.getElementById('editCategorias');
+    if (allCollections.length === 0) {
+      container.innerHTML = '<span style="color:var(--muted);font-size:10px;">Sin categorías disponibles</span>';
+      return;
+    }
+    container.innerHTML = allCollections.map(c => {
+      const checked = productCollections.some(pc => pc.id === c.id) ? 'checked' : '';
+      return `<label class="cat-checkbox"><input type="checkbox" value="${esc(c.id)}" ${checked}> ${esc(c.name)}</label>`;
+    }).join('');
+  }
+
+  // ═══════════════════════════════════════════════════
+  // v3.6.0 — CATEGORÍAS: vocabulario y control
+  // ═══════════════════════════════════════════════════
+  // Lista de consulta para nombrar bien los tipos de producto.
+  // NO se compara con las categorías existentes: las categorías
+  // reales del salón agrupan y van en plural ("Champús",
+  // "Tratamientos Capilares", "Planchas de pelo"), así que una
+  // comparación estricta rechazaría productos bien clasificados.
+  // Es una ayuda de redacción, no un validador.
+  const TIPOS_PRODUCTO = [
+    { grupo: 'Cuidado capilar', items: ['Champú','Champú en seco','Acondicionador','Mascarilla','Tratamiento capilar','Tratamiento sin aclarado','Sérum','Aceite capilar','Ampolla','Loción capilar','Protector térmico','Protector solar capilar','Desenredante','Reparador de puntas','Exfoliante capilar','Tratamiento anticaída'] },
+    { grupo: 'Peinado y acabado', items: ['Gel','Gomina','Cera','Pomada','Pasta moldeadora','Espuma','Crema de peinado','Spray fijador','Laca','Spray de volumen','Spray de textura','Polvo de volumen','Brillo capilar','Fijador de rizos'] },
+    { grupo: 'Coloración', items: ['Tinte','Tinte semipermanente','Baño de color','Matizador','Tóner','Decolorante','Oxidante','Corrector de color','Mascarilla de color','Champú con pigmento'] },
+    { grupo: 'Herramientas y aparatos', items: ['Cepillo','Peine','Secador','Plancha','Tenacilla','Rizador','Máquina de corte','Recortadora','Difusor','Boquilla para secador','Rodillo','Pinza','Tijera'] },
+    { grupo: 'Barbería', items: ['Champú para barba','Aceite para barba','Bálsamo para barba','Cera para barba','Espuma de afeitar','Gel de afeitar','Aftershave','Navaja','Maquinilla de afeitar','Cepillo para barba'] },
+    { grupo: 'Varios', items: ['Accesorio para el cabello','Producto infantil','Kit de tratamiento','Pack de productos','Producto profesional','Producto de viaje','Recambio','Estuche de regalo'] },
+    { grupo: 'Otros', items: ['Otros — si no encaja en ninguno de los anteriores'] }
+  ];
+
+  // Nombres con los que Wix llama a su categoría general, la que
+  // contiene todos los productos automáticamente. No cuenta como
+  // clasificación.
+  const CAT_GENERAL = ['all products', 'todos los productos'];
+
+  function esCategoriaGeneral(nombre) {
+    return CAT_GENERAL.includes(String(nombre || '').trim().toLowerCase());
+  }
+
+  function pintarPanelTipos() {
+    const panel = document.getElementById('tiposPanel');
+    if (!panel) return;
+    panel.innerHTML = '<div class="tipos-intro">Nombres sugeridos para la categoría de TIPO DE PRODUCTO. Son una guía para nombrarlas bien: no son las categorías que ya existen en tu tienda, y no hace falta que coincidan palabra por palabra.</div>' + TIPOS_PRODUCTO.map(g =>
+      `<div class="tipos-grupo">${esc(g.grupo)}</div><div>${g.items.map(i => esc(i)).join(' · ')}</div>`
+    ).join('');
+  }
+  pintarPanelTipos();
+
+  const btnVerTipos = document.getElementById('btnVerTipos');
+  if (btnVerTipos) {
+    btnVerTipos.addEventListener('click', () => {
+      const panel = document.getElementById('tiposPanel');
+      const abierto = panel.classList.toggle('open');
+      btnVerTipos.textContent = abierto
+        ? '📖 Ocultar categorías sugeridas'
+        : '📖 Categorías según tipos de producto sugeridas';
+    });
+  }
+
+  // Se pone a true cuando el usuario confirma que quiere guardar
+  // sin las categorías completas. Se reinicia al abrir el modal.
+  let avisoCategoriasConfirmado = false;
+
+  // Devuelve las categorías marcadas que SÍ clasifican, es decir
+  // sin contar la general de Wix.
+  function categoriasClasificadoras() {
+    const ids = [...document.querySelectorAll('#editCategorias input:checked')].map(cb => cb.value);
+    return ids.filter(id => {
+      const c = allCollections.find(x => x.id === id);
+      return c && !esCategoriaGeneral(c.name);
+    });
+  }
+
+  // ═══════════════════════════════════════════════════
+  // GUARDAR PRODUCTO
+  // ═══════════════════════════════════════════════════
+  function saveProduct() {
+    const nombre = document.getElementById('editNombre').value.trim();
+    if (!nombre) { showToast('⚠️ El nombre es obligatorio', true); return; }
+
+    const precio = document.getElementById('editPrecio').value;
+    if (modalMode === 'new' && (!precio || parseFloat(precio) <= 0)) {
+      showToast('⚠️ El precio es obligatorio para un producto nuevo', true);
+      return;
+    }
+
+    // v3.6.0: control de categorías. Hacen falta dos además de la
+    // general: una de tipo de producto y otra de marca. Avisa una
+    // vez; si el usuario insiste, guarda igual.
+    const btnSave = document.getElementById('btnGuardarProducto');
+
+    if (categoriasClasificadoras().length < 2 && !avisoCategoriasConfirmado) {
+      document.getElementById('modalCategoriasFaltan').style.display = 'flex';
+      return;
+    }
+
+    btnSave.disabled = true;
+    btnSave.textContent = '⏳ Guardando…';
+
+    const additionalInfoSections = [
+      { title: 'Descripción corta',              description: getRich('editDescCorta') },
+      { title: 'Componentes',                    description: getRich('editComponentes') },
+      { title: 'Usos recomendados del producto', description: getRich('editUsos') },
+      { title: 'Ventajas del producto',          description: getRich('editVentajas') }
+    ].filter(s => s.description !== '');
+
+    const campos = {
+      name: nombre,
+      price: parseFloat(precio) || 0,
+      // v3.3.0: el COSTE es SOLO LECTURA en el editor. Se gestiona
+      // desde el módulo Almacén (colección KamisuiteWarehouse). No se
+      // envía para que el editor no intente escribirlo (Wix Stores no
+      // lo permite en productos simples).
+      cost: null,
+      sku: document.getElementById('editSku').value.trim(),
+      brand: document.getElementById('editMarca').value.trim(),
+      description: document.getElementById('editDescripcion').value.trim(),
+      ribbon: document.getElementById('editRibbon').value.trim(),
+      visible: document.getElementById('editVisible').checked,
+      additionalInfoSections: additionalInfoSections
+    };
+
+    // v3.0: incluir stock solo si el input está habilitado y tiene
+    // un valor numérico válido. Si está vacío o disabled, no se toca.
+    const stockInput = document.getElementById('editStock');
+    if (!stockInput.disabled && stockInput.value !== '') {
+      const n = parseInt(stockInput.value, 10);
+      if (!isNaN(n) && n >= 0) {
+        campos.quantityInStock = n;
+      }
+    }
+
+    // v3.1: enviar siempre el estado del seguimiento. El backend
+    // decide si hay que activarlo o desactivarlo según el valor
+    // actual del producto.
+    campos.trackInventory = document.getElementById('editTrackInventory').checked;
+
+    const imagenData = {};
+    if (imagesToRemove.length > 0) imagenData.toRemove = imagesToRemove;
+    if (imagesToAdd.length > 0) imagenData.toAdd = imagesToAdd;
+    const tieneImagenes = imagesToRemove.length > 0 || imagesToAdd.length > 0;
+
+    if (modalMode === 'edit') {
+      const prod = allProductos.find(p => p.id === editingProductId);
+      const currentCatIds = (prod?.collections || []).map(c => c.id);
+      const selectedCatIds = [...document.querySelectorAll('#editCategorias input:checked')].map(cb => cb.value);
+      const addIds = selectedCatIds.filter(id => !currentCatIds.includes(id));
+      const removeIds = currentCatIds.filter(id => !selectedCatIds.includes(id));
+
+      parent.postMessage({
+        type: 'guardarProducto',
+        payload: {
+          productId: editingProductId,
+          campos,
+          imagenes: tieneImagenes ? imagenData : null,
+          categorias: (addIds.length || removeIds.length) ? { addIds, removeIds } : null
+        }
+      }, '*');
+
+    } else {
+      const selectedCatIds = [...document.querySelectorAll('#editCategorias input:checked')].map(cb => cb.value);
+      parent.postMessage({
+        type: 'crearProducto',
+        payload: {
+          campos,
+          imagenes: tieneImagenes ? imagenData : null,
+          categorias: selectedCatIds.length > 0 ? selectedCatIds : null
+        }
+      }, '*');
+    }
+  }
+
+  function startDeleteProduct() {
+    const prod = allProductos.find(p => p.id === editingProductId);
+    if (!prod) return;
+    document.getElementById('deleteProductName').textContent = `Producto: "${prod.name}"`;
+    document.getElementById('inputConfirmDelete').value = '';
+    document.getElementById('btnConfirmDelete').disabled = true;
+    document.getElementById('modalConfirmDelete').style.display = 'flex';
+  }
+
+  function confirmDeleteProduct() {
+    if (!editingProductId) return;
+    document.getElementById('btnConfirmDelete').disabled = true;
+    document.getElementById('btnConfirmDelete').textContent = '⏳…';
+    parent.postMessage({
+      type: 'eliminarProducto',
+      payload: { productId: editingProductId }
+    }, '*');
+  }
+
+  function createCategory() {
+    const nombre = document.getElementById('inputNuevaCategoria').value.trim();
+    if (!nombre) { showToast('⚠️ El nombre es obligatorio', true); return; }
+    const btn = document.getElementById('btnCrearCategoria');
+    btn.disabled = true;
+    btn.textContent = '⏳ Creando…';
+    parent.postMessage({ type: 'crearCategoria', payload: { nombre } }, '*');
+  }
+
+  // ═══════════════════════════════════════════════════
+  // v3.0 — CONFIRMACIÓN DE DESCUENTO DE UNIDAD
+  // ═══════════════════════════════════════════════════
+  function openConfirmDescuento(productId, productName) {
+    pendingDecrementProductId = productId;
+    document.getElementById('descuentoTexto').innerHTML = `¿Descontar <strong>1 unidad</strong> de <strong style="color:var(--accent);">${esc(productName)}</strong>?`;
+    document.getElementById('btnConfirmarDescuento').disabled = false;
+    document.getElementById('btnConfirmarDescuento').textContent = 'CONFIRMAR';
+    document.getElementById('modalConfirmDescuento').style.display = 'flex';
+  }
+
+  function closeConfirmDescuento() {
+    document.getElementById('modalConfirmDescuento').style.display = 'none';
+    pendingDecrementProductId = null;
+  }
+
+  function confirmarDescuento() {
+    if (!pendingDecrementProductId) return;
+    const btn = document.getElementById('btnConfirmarDescuento');
+    btn.disabled = true;
+    btn.textContent = '⏳ Descontando…';
+    parent.postMessage({
+      type: 'descontar-unidad',
+      payload: { productId: pendingDecrementProductId }
+    }, '*');
+  }
+
+  // ═══════════════════════════════════════════════════
+  // COMMS WITH WIX
+  // ═══════════════════════════════════════════════════
+  window.addEventListener('message', (event) => {
+    const msg = event.data;
+    if (!msg || typeof msg !== 'object') return;
+
+    if (msg.type === 'data') { render(msg.payload); }
+
+    if (msg.type === 'error') {
+      el.content.innerHTML = `<div class="error-msg">❌ ${esc(msg.message || 'Error')}</div>`;
+    }
+
+    if (msg.type === 'productoGuardado') {
+      closeProductModal();
+      showToast('✅ Producto actualizado');
+    }
+    if (msg.type === 'productoGuardadoParcial') {
+      closeProductModal();
+      const errores = (msg.payload?.errores || []).join(' | ');
+      showToast('⚠️ Guardado parcial: ' + errores, true);
+    }
+    if (msg.type === 'productoCreado') {
+      closeProductModal();
+      showToast(`✅ Producto creado: ${msg.payload?.name || ''}`);
+    }
+    if (msg.type === 'productoEliminado') {
+      document.getElementById('modalConfirmDelete').style.display = 'none';
+      closeProductModal();
+      showToast('🗑️ Producto eliminado');
+    }
+    // v3.7.0: duplicado. El listado ya viene recargado en el
+    // mensaje 'data' anterior, así que la copia existe en
+    // allProductos y se puede abrir su ficha directamente.
+    if (msg.type === 'productoDuplicado') {
+      showToast('⧉ Copia creada. Cambia el tamaño en el nombre y publícala cuando esté lista.');
+      const nuevoId = msg.payload?.productId;
+      if (nuevoId) openEditModal(nuevoId);
+    }
+    if (msg.type === 'duplicadoError') {
+      showToast('❌ No se pudo duplicar: ' + (msg.payload?.error || 'error'), true);
+      document.querySelectorAll('.btn-dup.busy').forEach(b => b.classList.remove('busy'));
+    }
+
+    if (msg.type === 'categoriaCreada') {
+      document.getElementById('modalCategoria').style.display = 'none';
+      const yaExistia = msg.payload?.yaExistia;
+      showToast(yaExistia
+        ? `ℹ️ Categoría "${msg.payload?.name}" ya existía`
+        : `✅ Categoría creada: ${msg.payload?.name}`
+      );
+    }
+    if (msg.type === 'errorEdicion') {
+      showToast('❌ ' + (msg.payload?.error || 'Error'), true);
+      const btnSave = document.getElementById('btnGuardarProducto');
+      if (btnSave) { btnSave.disabled = false; btnSave.textContent = '💾 GUARDAR'; }
+      const btnDel = document.getElementById('btnConfirmDelete');
+      if (btnDel) { btnDel.disabled = false; btnDel.textContent = '🗑️ ELIMINAR'; }
+      const btnCat = document.getElementById('btnCrearCategoria');
+      if (btnCat) { btnCat.disabled = false; btnCat.textContent = '✓ CREAR'; }
+    }
+
+    // v3.0: descuento
+    if (msg.type === 'unidadDescontada') {
+      closeConfirmDescuento();
+      showToast('✅ 1 unidad descontada');
+    }
+    if (msg.type === 'descuentoError') {
+      closeConfirmDescuento();
+      showToast('❌ ' + (msg.payload?.error || 'Error descontando'), true);
+    }
+
+    // v3.0: stock setear (cuando se guarda desde el modal)
+    if (msg.type === 'stockError') {
+      showToast('❌ Stock: ' + (msg.payload?.error || 'Error'), true);
+    }
+
+    // v3.0: coste real cargado
+    if (msg.type === 'costeCargado') {
+      // Si el modal sigue abierto y es el mismo producto, actualizar campo
+      if (modalMode === 'edit' && editingProductId === msg.payload?.productId) {
+        const costeInput = document.getElementById('editCoste');
+        const cost = msg.payload?.cost;
+        if (cost !== null && cost !== undefined) {
+          costeInput.value = cost;
+        } else {
+          costeInput.value = '';
+        }
+        costeInput.placeholder = '';
+      }
+    }
+    // v3.8.0: precio promocional
+    if (msg.type === 'promocionActivada') {
+      showToast('🏷 Oferta activada');
+      closeProductModal();
+    }
+    if (msg.type === 'promocionQuitada') {
+      showToast('🏷 Oferta retirada');
+      closeProductModal();
+    }
+    if (msg.type === 'promocionError') {
+      const btnOn = document.getElementById('btnActivarPromo');
+      const btnOff = document.getElementById('btnQuitarPromo');
+      // v3.10.0: se repinta el estado REAL del producto, no uno fijo.
+      const prodActual = (allProductos || []).find(x => x.id === editingProductId) || null;
+      pintarEstadoPromo(prodActual);
+      showToast('❌ ' + (msg.payload?.error || 'Error con la oferta'), true);
+    }
+
+    if (msg.type === 'costeError') {
+      // Silencioso: el campo se queda vacío con placeholder normal
+      if (modalMode === 'edit' && editingProductId === msg.payload?.productId) {
+        const costeInput = document.getElementById('editCoste');
+        costeInput.placeholder = '';
+      }
+    }
+  });
+
+  // Boot
+  parent.postMessage({ type: 'ready' }, '*');
+</script>
+</body>
+</html>
